@@ -3,6 +3,31 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Example;
+
+namespace Example
+{
+	public struct Vec3
+	{
+		public float x;
+		public float y;
+		public float z;
+	}
+
+	public struct Color
+	{
+		public float r;
+		public float g;
+		public float b;
+	}
+
+	public struct Entity
+	{
+		public string name;
+		public Color color;
+		public Vec3 position;
+	}
+}
 
 namespace ImWpf
 {
@@ -92,82 +117,72 @@ namespace ImWpf
 
 	public class WidgetLayout
 	{
-		private Label label1;
-
-		public class Widget
-		{
-			public string Name { get; set; }
-		}
-
+		const int kLineHeight = 16;
+		ScrollViewer m_scrollView;
+		StackPanel m_stackPanel;
+		
 		public WidgetLayout(Window root)
 		{
 			// Scroll Viewer
-			var scrollViewer = new ScrollViewer();
-			scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+			m_scrollView = new ScrollViewer();
+			m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
 
 			// StackPanel to contain the widgets
-			widgetPanel = new StackPanel();
-			scrollViewer.Content = widgetPanel;
+			m_stackPanel = new StackPanel();
+			m_scrollView.Content = m_stackPanel;
 
 			// Add the scroll viewer to the window
-			root.Content = scrollViewer;
+			root.Content = m_scrollView;
+		}
+	
+		public void Begin()
+		{
 
-			// Test: Add a few widgets
-			AddWidget(new Widget { Name = "Widget 1" });
-			AddWidget(new Widget { Name = "Widget 2" });
-			AddWidget(new Widget { Name = "Widget 3" });
 		}
 
-		private List<Widget> widgets = new();
-		private StackPanel widgetPanel;
-
-		public void AddWidget(Widget widget)
+		public void End()
 		{
-			widgets.Add(widget);
-			RedrawWidgets();
+
 		}
 
-		public void RemoveWidget(string name)
+		public void EditVec3(string label, ref Vec3 value, Action<Vec3> onEdit)
 		{
-			var widget = widgets.Find((w)=>w.Name == name);
-			if(widget!= null)
+
+		}
+
+		public void Text(string label)
+		{
+
+		}
+
+		public void EditText(string label, ref string value, Action<string> onEdit)
+		{
+
+		}
+	}
+
+	public class ExampleApp
+	{
+		public struct UpdateLoop
+		{
+			public WidgetLayout layout;
+			private Entity m_dummy;
+
+			public void Update()
 			{
-				widgets.Remove(widget);
-			}
-			RedrawWidgets();
-		}
 
-		private void RedrawWidgets()
-		{
-			widgetPanel.Children.Clear(); // Clear existing widgets
+				layout.Begin();
+				
 
-			foreach (var widget in widgets)
-			{
-				// Create a label to represent the widget content
-				var label = new Label
-				{
-					Content = widget.Name,
-					Margin = new Thickness(5)
-				};
-
-				// Create a border for the widget
-				var border = new Border
-				{
-					BorderBrush = Brushes.Black,
-					BorderThickness = new Thickness(1),
-					Margin = new Thickness(5),
-					Padding = new Thickness(5),
-					Child = label
-				};
-
-				// Add the border-wrapped widget to the panel
-				widgetPanel.Children.Add(border);
+				layout.End();
 			}
 		}
-
-		void button1_Click(object sender, RoutedEventArgs e)
+		static void TimerCallback(object? state)
 		{
-			label1.Content = "Hello WPF!";
+			if (state is UpdateLoop updateLoop)
+			{
+				updateLoop.Update();
+			}
 		}
 
 		[STAThread]
@@ -181,19 +196,25 @@ namespace ImWpf
 
 
 			ControlWindow controlWindow = new(new Window());
+
 			controlWindow.AddButton("Add widget", () =>
 			{
-				layout.AddWidget(new Widget { Name = nextButton });
+				//layout.AddWidget(new Widget { Name = nextButton });
 			});
+
 			controlWindow.AddButton("Remove Widget", () =>
 			{
-				layout.RemoveWidget(nextButton);
+				//layout.RemoveWidget(nextButton);
 			});
+
 			controlWindow.AddText((string val) =>
 			{
 				nextButton = val;
 			});
 
+			UpdateLoop updateLoop = new();
+
+			Timer timer = new Timer(new TimerCallback(TimerCallback), updateLoop, 1000, 1000 / 120);
 
 			controlWindow.Show();
 
