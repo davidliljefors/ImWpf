@@ -1,9 +1,12 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Example;
+using System.IO.Hashing;
+using System.Runtime.InteropServices;
 
 namespace Example
 {
@@ -31,6 +34,8 @@ namespace Example
 
 namespace ImWpf
 {
+	using u64 = UInt64;
+
 	public class ControlWindow
 	{
 		struct ButtonData
@@ -117,27 +122,50 @@ namespace ImWpf
 
 	public class WidgetLayout
 	{
-		const int kLineHeight = 16;
-		ScrollViewer m_scrollView;
-		StackPanel m_stackPanel;
+		private static u64 XXH3Value<T>(ref T value, u64 seed) where T : struct
+		{
+			var sizeofT =  Marshal.SizeOf<T>();
+			var valueSpan = MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref value, sizeofT));
+			return XxHash3.HashToUInt64(valueSpan, (long)seed);
+		}
+
+		private static u64 XXH3String(string str, u64 seed = 0)
+		{
+			return XxHash3.HashToUInt64(MemoryMarshal.AsBytes(str.AsSpan()), (long)seed);
+		}
+
+		ref struct WidgetHolder
+		{
+			public ContentControl control;
+			public u64 lastState;
+		}
+
+		private const int kLineHeight = 16;
+		private ScrollViewer m_scrollView;
+		private Canvas m_canvas;
+		private Action m_redraw;
+
+		private Dictionary<u64, WidgetHolder> m_data;
+		private u64 m_rebuildState = 0;
 		
-		public WidgetLayout(Window root)
+		public WidgetLayout(Window root, Action redraw)
 		{
 			// Scroll Viewer
 			m_scrollView = new ScrollViewer();
 			m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
 
-			// StackPanel to contain the widgets
-			m_stackPanel = new StackPanel();
-			m_scrollView.Content = m_stackPanel;
+			m_canvas = new Canvas();
+			m_scrollView.Content = m_canvas;
 
 			// Add the scroll viewer to the window
 			root.Content = m_scrollView;
+
+			m_redraw = redraw;
 		}
 	
 		public void Begin()
 		{
-
+			m_rebuildState = 0;
 		}
 
 		public void End()
@@ -145,9 +173,26 @@ namespace ImWpf
 
 		}
 
-		public void EditVec3(string label, ref Vec3 value, Action<Vec3> onEdit)
+		public Vec3 EditVec3(string label, Vec3 value, Action<Vec3> onEdit, [CallerLineNumber] u64 lineNum = 0, [CallerFilePath] string caller = "")
 		{
+			// u64 callerHash = XXH3String(caller, lineNum);
 
+			// Button control = GetOrCreateWidget<Button>
+
+			return value;
+		}
+
+		public void Button(string label, Action onClicked, [CallerLineNumber] u64 lineNum = 0, [CallerFilePath] string caller = "")
+		{
+			u64 callerHash = XXH3String(caller, lineNum);
+			m_rebuildState = XXH3Value(ref callerHash, m_rebuildState);
+			
+			if(m_data.ContainsKey(callerHash))
+			{
+				return;
+			}
+		
+			WidgetHolder holder = new();
 		}
 
 		public void Text(string label)
@@ -159,41 +204,73 @@ namespace ImWpf
 		{
 
 		}
+
+		private void OnEdit()
+		{
+
+		}
+
+		private WidgetHolder GetOrCreateWidget<T>(u64 hash) where T : ContentControl, new()
+		{
+			if(m_data.TryGetValue(hash, out WidgetHolder holder))
+			{
+				return holder;
+			}
+
+			WidgetHolder newHolder = new();
+
+			m_data.Add(hash, newHolder);
+
+			return newHolder;
+		}
+
+		private u64 ItemHash(string callerAssembly, int callerLine)
+		{
+			u64 hash = 0;
+			return hash;
+		}
 	}
 
 	public class ExampleApp
 	{
-		public struct UpdateLoop
+		public class UpdateLoop
 		{
 			public WidgetLayout layout;
-			private Entity m_dummy;
+			private Entity[] m_entities = new Entity[10];
 
-			public void Update()
+			public void Redraw()
 			{
-
 				layout.Begin();
 				
+				for (int i = 0; i< m_entities.Length; ++i)
+				{
+					m_entities[i].position = layout.EditVec3("Entity pos", m_entities[i].position, (_)=>{});
+				}
 
 				layout.End();
 			}
 		}
-		static void TimerCallback(object? state)
+
+		static Func<int, int, int> GetFunc()
 		{
-			if (state is UpdateLoop updateLoop)
-			{
-				updateLoop.Update();
-			}
+			return (a, b) => a+b+1;
 		}
 
 		[STAThread]
 		public static void Main()
 		{
-			string nextButton = "";
+			var lambda = (int a, int b) => a+b;
+
+			Func<int, int, int> func1 = lambda;
+			Func<int, int, int> func2 = GetFunc();
+
+			bool same1 = lambda.Target == func1.Target;
+			bool same2 = lambda.Target == func2.Target;
 
 			Application app = new Application();
 			Window rootWindow = new();
-			WidgetLayout layout = new(rootWindow);
-
+			UpdateLoop updateLoop = new();
+			updateLoop.layout = new(rootWindow, updateLoop.Redraw);
 
 			ControlWindow controlWindow = new(new Window());
 
@@ -209,19 +286,14 @@ namespace ImWpf
 
 			controlWindow.AddText((string val) =>
 			{
-				nextButton = val;
+				//nextButton = val;
 			});
-
-			UpdateLoop updateLoop = new();
-
-			Timer timer = new Timer(new TimerCallback(TimerCallback), updateLoop, 1000, 1000 / 120);
 
 			controlWindow.Show();
 
 			rootWindow.Width = 600;
 			rootWindow.Height = 800;
 			app.Run(rootWindow);
-
 		}
 	}
 }
