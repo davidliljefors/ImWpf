@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -8,6 +9,7 @@ using Example;
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.Xml;
+using System.Windows.Shapes;
 
 namespace Example
 {
@@ -36,27 +38,6 @@ namespace Example
 namespace ImWpf
 {
 	using u64 = UInt64;
-
-	static class GcUtils	
-	{
-		public static void DumpStats()
-		{
-			// Get the current generation
-			int gen0 = GC.CollectionCount(0);
-			int gen1 = GC.CollectionCount(1);
-			int gen2 = GC.CollectionCount(2);
-
-			// Get the total memory used
-			long totalMemory = GC.GetTotalMemory(false);
-
-			Console.WriteLine("GC Statistics:");
-			Console.WriteLine($"  Collections (Gen 0): {gen0}");
-			Console.WriteLine($"  Collections (Gen 1): {gen1}");
-			Console.WriteLine($"  Collections (Gen 2): {gen2}");
-			Console.WriteLine($"  Total Memory Used: {totalMemory / (1024)} KB");
-			Console.WriteLine();
-		}
-	}
 
 	public struct Layout
 	{
@@ -90,25 +71,72 @@ namespace ImWpf
 		}
 	}
 
+	public class ManualLayoutCanvas : Canvas
+	{
+		public Size size;
+		protected override Size MeasureOverride(Size availableSize)
+		{
+			return availableSize;
+		}
+
+		protected override Size ArrangeOverride(Size finalSize)
+		{
+			double totalWidth = finalSize.Width;
+			double totalHeight = finalSize.Height;
+
+			// Cache values for arrangement
+			double childWidth = totalWidth / Children.Count; // Example calculation
+
+			// Calculate arrangement positions
+			Rect[] arrangementRectangles = new Rect[Children.Count];
+
+			for (int i = 0; i < Children.Count; i++)
+			{
+				arrangementRectangles[i] = new Rect(i * childWidth, 0, childWidth, totalHeight);
+			}
+
+			// Arrange children in a second pass
+			for (int i = 0; i < Children.Count; i++)
+			{
+				UIElement child = Children[i];
+				child.Arrange(arrangementRectangles[i]);
+			}
+
+			return finalSize;
+		}
+
+		private Rect GetChildBounds(UIElement child)
+		{
+			// Example: Retrieve manually calculated position and size
+			double x = Canvas.GetLeft(child);  // Custom X position
+			double y = Canvas.GetTop(child);   // Custom Y position
+			double width = 500; // Custom Width (or any set value)
+			double height = 500; // Custom Height (or any set value)
+
+			// Return a Rect specifying position and size
+			return new Rect(x, y, width, height);
+		}
+	}
+
 	public class ControlWindow
 	{
-		struct ButtonData
+		private struct ButtonData
 		{
 			public string Label;
 			public Action OnClick;
 			public Button Button;
 		}
 
-		struct EditTextData
+		private struct EditTextData
 		{
 			public Action<string> OnEdit;
 			public TextBox TextBox;
 		}
 
-		private Window m_root;
-		private StackPanel m_stackPanel;
-		private Dictionary<Button, ButtonData> m_buttons = new();
-		private Dictionary<TextBox, EditTextData> m_text = new();
+		private readonly Window m_root;
+		private readonly StackPanel m_stackPanel;
+		private readonly Dictionary<Button, ButtonData> m_buttons = new();
+		private readonly Dictionary<TextBox, EditTextData> m_text = new();
 
 		public ControlWindow(Window root)
 		{
@@ -117,8 +145,11 @@ namespace ImWpf
 			m_root.Width = 300;
 			m_root.Height = 400;
 
-			var scrollViewer = new ScrollViewer();
-			scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+			var scrollViewer = new ScrollViewer
+			{
+				VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+			};
+
 			m_root.Content = scrollViewer;
 
 			// StackPanel to contain the widgets
@@ -147,9 +178,11 @@ namespace ImWpf
 		{
 			TextBox text = new();
 
-			EditTextData data = new();
-			data.OnEdit = onEdit;
-			data.TextBox = text;
+			EditTextData data = new()
+			{
+				OnEdit = onEdit,
+				TextBox = text
+			};
 
 			m_stackPanel.Children.Add(data.TextBox);
 			m_text.Add(data.TextBox, data);
@@ -176,47 +209,16 @@ namespace ImWpf
 
 	public class WidgetLayout
 	{
-		private static u64 XXH3Value<T>(ref T value, u64 seed) where T : struct
+		private struct WidgetHolder
 		{
-			var sizeofT =  Marshal.SizeOf<T>();
-			var valueSpan = MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref value, sizeofT));
-			return XxHash3.HashToUInt64(valueSpan, (long)seed);
-		}
-
-		private static u64 XXH3String(string str, u64 seed = 0)
-		{
-			return XxHash3.HashToUInt64(MemoryMarshal.AsBytes(str.AsSpan()), (long)seed);
-		}
-
-		private void SetElementPositionAndMoveCursor(Layout layout, Control control, ref double curX, ref double curY, double lineWidth)
-		{
-			Canvas.SetLeft(control, curX);
-			Canvas.SetTop(control, curY);
-			control.Height = kLineHeight - kMargin;
-
-			if(layout.absolute)
-			{
-				control.Width = layout.width;
-				curX += control.Width + kMargin;
-			}
-			if(!layout.absolute)
-			{
-				double remainingWidth = lineWidth - curX - kMargin/2;
-				control.Width = remainingWidth * layout.width;
-				curX += control.Width + kMargin;
-			}
-
-			if(!layout.nextOnSameLine)
-			{
-				curX = kMargin;
-				curY += kLineHeight;
-			}
-		}
-
-		struct WidgetHolder
-		{
-			public ContentControl control;
+			public FrameworkElement widget;
 			public u64 lastState;
+		}
+
+		private struct AddedWidget
+		{
+			public WidgetHolder widgetHolder;
+			public int index;
 		}
 
 		private const double kLineHeight = 32;
@@ -225,92 +227,184 @@ namespace ImWpf
 		private double m_cursorX;
 		private double m_cursorY;
 
-		private ScrollViewer m_scrollView;
-		private Canvas m_canvas;
-		private Action m_redraw;
-
+		private readonly ScrollViewer m_scrollView;
+		private readonly Canvas m_canvas;
 		private readonly Dictionary<u64, WidgetHolder> m_data = new();
+		private readonly Dictionary<u64, Control> m_widgets = new();
+		private readonly List<WidgetHolder> m_lastWidgets = new();
+		private readonly List<AddedWidget> m_addedWidgets = new();
+		private int m_index;
+		private int m_consumeIndex;
+		private double m_lastHeight;
+		
+		private Action m_redraw;
+		private Window m_root;
 		private u64 m_rebuildState = 0;
 		
-		public WidgetLayout(Window root, Action redraw)
+		public WidgetLayout(Window root)
 		{
+			m_redraw = () =>{};
+			m_root = root;
 			// Scroll Viewer
-			m_redraw = redraw;
 			m_scrollView = new ScrollViewer();
 			m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
 
 			m_canvas = new Canvas
             {
+				Width = 400,
+				Height = 400,
                 Background = System.Windows.Media.Brushes.DimGray
-            };
-
-			m_scrollView.SizeChanged += (s, e) =>
-            {
-                m_canvas.Width = m_scrollView.ActualWidth;
-                m_canvas.Height = m_scrollView.ActualHeight;
-				m_redraw.Invoke();
             };
 
 			m_scrollView.Content = m_canvas;
 
 			// Add the scroll viewer to the window
-			root.Content = m_scrollView;
+			m_root.Content = m_scrollView;
 
+			CompositionTarget.Rendering += Render;
 		}
-	
+
+		public void BindRedrawFunc(Action redraw)
+		{
+			m_redraw = redraw;
+		}
+
+		private u64 m_lastSizeHash = 0;
+
+		private void Render(object? _, EventArgs __)
+		{
+			bool needUpdate = false;
+			var prevScrollbar = m_scrollView.VerticalScrollBarVisibility;
+
+			if (Math.Abs(m_canvas.Height - m_scrollView.ViewportHeight) > 0.1)
+			{
+				if (m_scrollView.ViewportHeight < m_lastHeight)
+				{
+					m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Visible;
+				}
+				else
+				{
+					m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
+				}
+
+				m_canvas.Height = m_scrollView.ViewportHeight;
+				needUpdate = true;
+			}
+
+			if(Math.Abs(m_canvas.Width - m_scrollView.ViewportWidth) > 0.1)
+			{
+				m_canvas.Width = m_scrollView.ViewportWidth;
+				needUpdate = true;
+			}
+
+			if (prevScrollbar != m_scrollView.VerticalScrollBarVisibility)
+			{
+				if (prevScrollbar == ScrollBarVisibility.Hidden)
+				{
+					m_canvas.Width -= SystemParameters.VerticalScrollBarWidth;
+				}
+				if (prevScrollbar == ScrollBarVisibility.Visible)
+				{
+					m_canvas.Width += SystemParameters.VerticalScrollBarWidth;
+				}
+			}
+
+			if (needUpdate)
+			{
+				m_redraw();
+			}
+		}
+
 		public void Begin()
 		{
 			m_rebuildState = 0;
 			m_cursorX = kMargin;
 			m_cursorY = kMargin;
-			m_canvas.Children.Clear();
+
+			m_index = 0;
+			m_consumeIndex = 0;
+		}
+
+		public int Reused = 0;
+		public int Created = 0;
+
+
+		private static bool CullElement(Rect rect, ScrollViewer sv, Canvas canvas)
+		{
+			// Get the viewport rectangle of the ScrollViewer
+			var viewportRect = new Rect(0, 0, sv.Width, sv.Height);
+
+			// Get the scroll offset
+			double offsetX = sv.HorizontalOffset;
+			double offsetY = sv.VerticalOffset;
+
+			// Adjust the viewport rectangle based on the scroll offsets
+			viewportRect.X += offsetX;
+			viewportRect.Y += offsetY;
+
+			return !viewportRect.IntersectsWith(rect);;
 		}
 
 		public void End()
 		{
+			Reused = m_lastWidgets.Count;
+			Created = m_addedWidgets.Count;
 
+			m_cursorY += kLineHeight;
+
+			foreach (AddedWidget widget in m_addedWidgets)
+			{
+				m_lastWidgets.Insert(widget.index, widget.widgetHolder);
+			}
+
+			m_lastHeight = m_cursorY;
+			m_addedWidgets.Clear();
 		}
 
-		public Vec3 EditVec3(string label, Vec3 value, Action<Vec3> onEdit, [CallerLineNumber] u64 lineNum = 0, [CallerFilePath] string caller = "")
+		public Vec3 EditVec3(string label, Vec3 value, Action<Vec3> onEdit, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
 		{
-			// u64 callerHash = XXH3String(caller, lineNum);
+			u64 callerStateHash = XXH3String(caller, (u64)lineNum);
+			u64 hLabel = XXH3Value(callerStateHash, m_rebuildState);
+			u64 hText1 = XXH3Value(0xBEEF, hLabel);
+			u64 hText2 = XXH3Value(0xDEAD, hText1);
+			u64 hText3 = XXH3Value(0xF0F0, hText2);
+			m_rebuildState = hText3;
 
-			// Button control = GetOrCreateWidget<Button>
+			var labelWidget = GetOrCreateRect(hLabel, label);
+			SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.2, true), labelWidget, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+			
+			var editX = GetOrCreateRect(hText1, value.x.ToString("F2"));
+			SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.333, true), editX, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+			
+			var editY = GetOrCreateRect(hText2, value.y.ToString("F2"));
+			SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.50, true), editY, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+			
+			var editZ = GetOrCreateRect(hText3, value.z.ToString("F2"));
+			SetElementPositionAndMoveCursor(Layout.RelativeWidth(1.0, false), editZ, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 
 			return value;
 		}
 
-		public void Button(string label, Action onClicked, Layout layout, [CallerLineNumber] u64 lineNum = 0, [CallerFilePath] string caller = "")
+		public void Button(string label, Action onClicked, Layout layout, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
 		{
-			u64 callerHash = XXH3String(caller, lineNum);
+			u64 callerHash = XXH3String(caller, (u64)lineNum);
 			m_rebuildState = XXH3Value(ref callerHash, m_rebuildState);
-			
-		
-			var button = new Button();
-			// WidgetHolder holder = new();
-			// holder.control = button;
 
-			button.Content = label;
-
+			Button button = GetOrCreateWidget<Button>(callerHash, label);
 			SetElementPositionAndMoveCursor(layout, button, ref m_cursorX, ref m_cursorY, m_canvas.Width);
-			
-			m_canvas.Children.Add(button);
 		}
 
-		public void Label(string label, Layout layout)
+		public void Label(string label, Layout layout, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
 		{
-			var labelWidget = new Label();
-			labelWidget.Content = label;
+			u64 callerHash = XXH3String(caller, (u64)lineNum);
+			m_rebuildState = XXH3Value(ref callerHash, m_rebuildState);
 
-			SetElementPositionAndMoveCursor(layout, labelWidget, ref m_cursorX, ref m_cursorY, m_canvas.Width);
-			
-			m_canvas.Children.Add(labelWidget);
-		}
-
-		private void NextLine()
-		{
-			m_cursorY += kLineHeight;
-			m_cursorX = kMargin;
+			Label textLabel = GetOrCreateWidget<Label>(callerHash, label);
+			if(!string.Equals((string)textLabel.Content, label))
+			{
+				textLabel.Content = label;
+			}
+			SetElementPositionAndMoveCursor(layout, textLabel, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 		}
 
 		public void Text(string label)
@@ -328,60 +422,223 @@ namespace ImWpf
 
 		}
 
-		private WidgetHolder GetOrCreateWidget<T>(u64 hash) where T : ContentControl, new()
+		private T GetOrCreateWidget<T>(u64 hash, string content) where T : ContentControl, new()
 		{
-			if(m_data.TryGetValue(hash, out WidgetHolder holder))
+			if (m_consumeIndex < m_lastWidgets.Count)
 			{
-				return holder;
+				if (m_lastWidgets[m_consumeIndex].lastState == hash)
+				{
+					var read = m_consumeIndex;
+					m_consumeIndex++;
+					m_index++;
+					return (T)m_lastWidgets[read].widget;
+				}
 			}
 
-			WidgetHolder newHolder = new();
+			T widget = new T
+			{
+				Content = content
+			};
 
-			m_data.Add(hash, newHolder);
+			var addedWidget = new AddedWidget();
+			addedWidget.index = m_index;
+			addedWidget.widgetHolder = new WidgetHolder { lastState = hash, widget = widget };
+			m_index++;
 
-			return newHolder;
+			m_addedWidgets.Add(addedWidget);
+			m_canvas.Children.Add(widget);
+
+			return widget;
 		}
 
-		private u64 ItemHash(string callerAssembly, int callerLine)
+		private Rectangle GetOrCreateRect(u64 hash, string _)
 		{
-			u64 hash = 0;
-			return hash;
+			if (m_consumeIndex < m_lastWidgets.Count)
+			{
+				if (m_lastWidgets[m_consumeIndex].lastState == hash)
+				{
+					var read = m_consumeIndex;
+					m_consumeIndex++;
+					m_index++;
+					return (Rectangle)m_lastWidgets[read].widget;
+				}
+			}
+
+			Rectangle widget = new Rectangle
+			{
+				Fill = Brushes.Blue
+			};
+
+			var addedWidget = new AddedWidget();
+			addedWidget.index = m_index;
+			addedWidget.widgetHolder = new WidgetHolder { lastState = hash, widget = widget };
+			m_index++;
+
+			m_addedWidgets.Add(addedWidget);
+			m_canvas.Children.Add(widget);
+
+			return widget;
+		}
+
+		private TextBox GetOrCreateTextbox(u64 hash, string content)
+		{
+			if (m_consumeIndex < m_lastWidgets.Count)
+			{
+				if (m_lastWidgets[m_consumeIndex].lastState == hash)
+				{
+					var read = m_consumeIndex;
+					m_consumeIndex++;
+					m_index++;
+					return (TextBox)m_lastWidgets[read].widget;
+				}
+			}
+
+			TextBox widget = new TextBox
+			{
+				Text = content,
+				VerticalContentAlignment = VerticalAlignment.Center
+			};
+
+			var addedWidget = new AddedWidget();
+			addedWidget.index = m_index;
+			addedWidget.widgetHolder = new WidgetHolder { lastState = hash, widget = widget };
+			m_index++;
+
+			m_addedWidgets.Add(addedWidget);
+			m_canvas.Children.Add(widget);
+
+			return widget;
+		}
+
+		private void UpdateHashState(u64 nextHash)
+		{
+
+		}
+
+		private static u64 XXH3Value<T>(ref T value, u64 seed) where T : struct
+		{
+			var sizeofT =  Marshal.SizeOf<T>();
+			var valueSpan = MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref value, sizeofT / 8));
+			return XxHash3.HashToUInt64(valueSpan, (long)seed);
+		}
+
+		private static u64 XXH3Value<T>(T value, u64 seed) where T : struct
+		{
+			var sizeofT =  Marshal.SizeOf<T>();
+			var valueSpan = MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref value, sizeofT / 8));
+			return XxHash3.HashToUInt64(valueSpan, (long)seed);
+		}
+
+		private static u64 XXH3String(string str, u64 seed = 0)
+		{
+			return XxHash3.HashToUInt64(MemoryMarshal.AsBytes(str.AsSpan()), (long)seed);
+		}
+
+		private void SetElementPositionAndMoveCursor(Layout layout, FrameworkElement widget, ref double curX, ref double curY, double lineWidth)
+		{
+			double desiredWith = 0;
+			double desiredX = curX;
+			double desiredY = curY;
+			if(layout.absolute)
+			{
+				desiredWith = layout.width;
+			}
+			else
+			{
+				double remainingWidth = Math.Max(lineWidth - curX - kMargin/2, 0);
+				desiredWith = remainingWidth * layout.width;
+			}
+
+			curX += desiredWith + kMargin;
+			if(widget.Height != Math.Max(kLineHeight - kMargin, 0))
+				widget.Height = Math.Max(kLineHeight - kMargin, 0);
+
+			widget.Width = desiredWith;
+
+			//var t = control.RenderTransform;
+
+			//if (control.RenderTransform is TranslateTransform x)
+			//{
+			//	x.X = desiredX;
+			//	x.Y = desiredY;
+			//}
+			//else
+			//{
+			//	control.RenderTransform = new TranslateTransform(curX, curY);
+			//}
+
+			Canvas.SetTop(widget, desiredY);
+			Canvas.SetLeft(widget, desiredX);
+			
+			if(!layout.nextOnSameLine)
+			{
+				curX = kMargin;
+				curY += kLineHeight;
+			}
+
+			Rect rect = new();
+
+			rect.X = desiredX;
+			rect.Y = desiredY;
+			rect.Width = desiredWith;
+			rect.Height = kLineHeight;
+
+			if (CullElement(rect, m_scrollView, m_canvas))
+			{
+				//Console.WriteLine("Culled element");
+			}
 		}
 	}
 
 	public class ExampleApp
 	{
-		public class UpdateLoop
+		public class UpdateLoop(in WidgetLayout layout)
 		{
-			public WidgetLayout layout;
+			private readonly WidgetLayout m_layout = layout;
 			private Entity[] m_entities = new Entity[10];
+			private Vec3 vec = new();
 
 			public void Redraw()
 			{
-				GcUtils.DumpStats();
+				int gen0 = GC.CollectionCount(0);
+				int gen1 = GC.CollectionCount(1);
+				int gen2 = GC.CollectionCount(2);
 
-				layout.Begin();
-				
-				layout.Button("Testbutton line 1", ()=>{}, new());
-				layout.Button("Testbutton line 2", ()=>{}, new());
-				layout.Button("Testbutton line 3", ()=>{}, new());
+				// Get the total memory used
 
-				layout.Label("Position", Layout.FixedWidth(60, true));
-				layout.Button("TestSameLine 2", ()=>{}, Layout.RelativeWidth(0.5, true));
-				layout.Button("TestSameLine 3", ()=>{}, new());
+				m_layout.Begin();
 
-				layout.Button("TestNextLine 1", ()=>{}, new());
+				long totalMemory = GC.GetTotalMemory(false);
 
-				layout.End();
+				m_layout.Button("Testbutton line 1", ()=>{}, new Layout());
+				m_layout.Button("Testbutton line 2", ()=>{}, new Layout());
+				m_layout.Button("Testbutton line 3", () => { }, new Layout());
+
+				//m_layout.Label("GC Statistics:", new Layout());
+				//m_layout.Label($"  Collections (Gen 0): {gen0}", new Layout());
+				//m_layout.Label($"  Collections (Gen 0): {gen1}", new Layout());
+				//m_layout.Label($"  Collections (Gen 0): {gen2}", new Layout());
+				//m_layout.Label($"  Total Memory Used: {totalMemory / (1024)} KB", new Layout());
+
+				//m_layout.Label("Position", Layout.FixedWidth(60, true));
+				//m_layout.Button("TestSameLine 2", () => { }, Layout.RelativeWidth(0.5, true));
+				//m_layout.Button("TestSameLine 3", () => { }, new Layout());
+				//m_layout.Button("TestNextLine 1", () => { }, new Layout());
+
+				//m_layout.Label($"Reused {m_layout.Reused} and created {m_layout.Created}", new Layout());
+
+				//vec.x += 1.23f;
+				//vec.y += 3.2f;
+				//vec.z += 123.0f;
+
+				for (int i = 0; i < 10; ++i)
+				{
+					m_layout.EditVec3("Position", vec, null);
+				}
+
+				m_layout.End();
 			}
 		}
-
-		static Func<int, int, int> GetFunc()
-		{
-			return (a, b) => a+b+1;
-		}
-
-
 
 		[DllImport("kernel32.dll")]
     	private static extern bool AllocConsole();
@@ -390,25 +647,28 @@ namespace ImWpf
 		public static void Main()
 		{
 			AllocConsole();
-			var lambda = (int a, int b) => a+b;
-
-			Func<int, int, int> func1 = lambda;
-			Func<int, int, int> func2 = GetFunc();
-
-			bool same1 = lambda.Target == func1.Target;
-			bool same2 = lambda.Target == func2.Target;
-
 			Application app = new Application();
+
+			var lunaTheme = new ResourceDictionary
+			{
+				Source = new Uri(
+					"pack://application:,,,/PresentationFramework.Luna;component/themes/Luna.NormalColor.xaml",
+					UriKind.Absolute)
+			};
+			app.Resources.MergedDictionaries.Clear();
+			app.Resources.MergedDictionaries.Add(lunaTheme);
+
 			Window rootWindow = new();
-			UpdateLoop updateLoop = new();
-			updateLoop.layout = new(rootWindow, updateLoop.Redraw);
+			WidgetLayout layout = new(rootWindow);
+			UpdateLoop updateLoop = new(in layout);
+			layout.BindRedrawFunc(updateLoop.Redraw);
+			updateLoop.Redraw();
 
 			ControlWindow controlWindow = new(new Window());
 
 			controlWindow.AddButton("Redraw", () =>
 			{
 				updateLoop.Redraw();
-				
 			});
 
 			controlWindow.AddButton("Remove Widget", () =>
