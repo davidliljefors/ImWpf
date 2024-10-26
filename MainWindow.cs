@@ -270,15 +270,37 @@ namespace ImWpf
 			m_redraw = redraw;
 		}
 
-		private u64 m_lastSizeHash = 0;
+		private double m_lastVerticalOffset = 0.0;
+
+		private record struct RenderState
+		{
+			public double WindowSizeX;
+			public double WindowSizeY;
+			public double ScrollOffsetY;
+		}
+
+		private RenderState m_lastState = new RenderState();
 
 		private void Render(object? _, EventArgs __)
 		{
 			bool needUpdate = false;
-			var prevScrollbar = m_scrollView.VerticalScrollBarVisibility;
-			//m_scrollView.Height = m_root.Height;
 
-			if (Math.Abs(m_canvas.Height - m_scrollView.ViewportHeight) > 0.1)
+			RenderState state = new RenderState
+			{
+				ScrollOffsetY = m_scrollView.VerticalOffset,
+				WindowSizeX = m_root.Width,
+				WindowSizeY = m_root.Height,
+			};
+
+			var prevScrollbar = m_scrollView.VerticalScrollBarVisibility;
+
+			if (m_lastState != state)
+			{
+				m_lastState = state;
+				needUpdate = true;
+			}
+
+			if (Math.Abs(m_canvas.Height - m_lastHeight) > 0.1)
 			{
 				if (m_scrollView.ViewportHeight < m_lastHeight)
 				{
@@ -291,6 +313,12 @@ namespace ImWpf
 
 				m_canvas.Height = m_lastHeight;
 				needUpdate = true;
+			}
+
+			if (Math.Abs(m_scrollView.VerticalOffset - m_lastVerticalOffset) > 0.1)
+			{
+				needUpdate = true;
+				m_lastVerticalOffset = m_scrollView.VerticalOffset;
 			}
 
 			if(Math.Abs(m_canvas.Width - m_scrollView.ViewportWidth) > 0.1)
@@ -314,7 +342,6 @@ namespace ImWpf
 			if (needUpdate)
 			{
 				m_redraw();
-
 			}
 		}
 
@@ -640,7 +667,7 @@ namespace ImWpf
 				//vec.y += 3.2f;
 				//vec.z += 123.0f;
 
-				for (int i = 0; i < 10000; ++i)
+				for (int i = 0; i < 100; ++i)
 				{
 					m_layout.EditVec3("Position", vec, null);
 				}
