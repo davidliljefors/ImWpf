@@ -209,6 +209,8 @@ namespace ImWpf
 
 	public class WidgetLayout
 	{
+		private const bool kEnableCulling = true;
+
 		private struct WidgetHolder
 		{
 			public FrameworkElement widget;
@@ -253,7 +255,6 @@ namespace ImWpf
             {
 				Width = 400,
 				Height = 400,
-                Background = System.Windows.Media.Brushes.DimGray
             };
 
 			m_scrollView.Content = m_canvas;
@@ -275,6 +276,7 @@ namespace ImWpf
 		{
 			bool needUpdate = false;
 			var prevScrollbar = m_scrollView.VerticalScrollBarVisibility;
+			//m_scrollView.Height = m_root.Height;
 
 			if (Math.Abs(m_canvas.Height - m_scrollView.ViewportHeight) > 0.1)
 			{
@@ -287,7 +289,7 @@ namespace ImWpf
 					m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
 				}
 
-				m_canvas.Height = m_scrollView.ViewportHeight;
+				m_canvas.Height = m_lastHeight;
 				needUpdate = true;
 			}
 
@@ -312,11 +314,15 @@ namespace ImWpf
 			if (needUpdate)
 			{
 				m_redraw();
+
 			}
 		}
 
 		public void Begin()
 		{
+			culled = 0;
+			drawn = 0;
+			m_canvas.Visibility = Visibility.Hidden;
 			m_rebuildState = 0;
 			m_cursorX = kMargin;
 			m_cursorY = kMargin;
@@ -328,17 +334,16 @@ namespace ImWpf
 		public int Reused = 0;
 		public int Created = 0;
 
+		private int culled = 0;
+		private int drawn = 0;
 
 		private static bool CullElement(Rect rect, ScrollViewer sv, Canvas canvas)
 		{
-			// Get the viewport rectangle of the ScrollViewer
-			var viewportRect = new Rect(0, 0, sv.Width, sv.Height);
+			var viewportRect = new Rect(0, 0, sv.ActualWidth, sv.ActualHeight);
 
-			// Get the scroll offset
 			double offsetX = sv.HorizontalOffset;
 			double offsetY = sv.VerticalOffset;
 
-			// Adjust the viewport rectangle based on the scroll offsets
 			viewportRect.X += offsetX;
 			viewportRect.Y += offsetY;
 
@@ -359,6 +364,8 @@ namespace ImWpf
 
 			m_lastHeight = m_cursorY;
 			m_addedWidgets.Clear();
+
+			m_canvas.Visibility = Visibility.Visible;
 		}
 
 		public Vec3 EditVec3(string label, Vec3 value, Action<Vec3> onEdit, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
@@ -370,16 +377,16 @@ namespace ImWpf
 			u64 hText3 = XXH3Value(0xF0F0, hText2);
 			m_rebuildState = hText3;
 
-			var labelWidget = GetOrCreateRect(hLabel, label);
+			var labelWidget = GetOrCreateWidget<Button>(hLabel, label);
 			SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.2, true), labelWidget, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 			
-			var editX = GetOrCreateRect(hText1, value.x.ToString("F2"));
+			var editX = GetOrCreateWidget<Button>(hText1, value.x.ToString("F2"));
 			SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.333, true), editX, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 			
-			var editY = GetOrCreateRect(hText2, value.y.ToString("F2"));
+			var editY = GetOrCreateWidget<Button>(hText2, value.y.ToString("F2"));
 			SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.50, true), editY, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 			
-			var editZ = GetOrCreateRect(hText3, value.z.ToString("F2"));
+			var editZ = GetOrCreateWidget<Button>(hText3, value.z.ToString("F2"));
 			SetElementPositionAndMoveCursor(Layout.RelativeWidth(1.0, false), editZ, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 
 			return value;
@@ -553,28 +560,6 @@ namespace ImWpf
 			if(widget.Height != Math.Max(kLineHeight - kMargin, 0))
 				widget.Height = Math.Max(kLineHeight - kMargin, 0);
 
-			widget.Width = desiredWith;
-
-			//var t = control.RenderTransform;
-
-			//if (control.RenderTransform is TranslateTransform x)
-			//{
-			//	x.X = desiredX;
-			//	x.Y = desiredY;
-			//}
-			//else
-			//{
-			//	control.RenderTransform = new TranslateTransform(curX, curY);
-			//}
-
-			Canvas.SetTop(widget, desiredY);
-			Canvas.SetLeft(widget, desiredX);
-			
-			if(!layout.nextOnSameLine)
-			{
-				curX = kMargin;
-				curY += kLineHeight;
-			}
 
 			Rect rect = new();
 
@@ -583,10 +568,34 @@ namespace ImWpf
 			rect.Width = desiredWith;
 			rect.Height = kLineHeight;
 
-			if (CullElement(rect, m_scrollView, m_canvas))
+			if(!layout.nextOnSameLine)
 			{
-				//Console.WriteLine("Culled element");
+				curX = kMargin;
+				curY += kLineHeight;
 			}
+
+			if (CullElement(rect, m_scrollView, m_canvas) && kEnableCulling)
+			{
+				++culled;
+				if (widget.Visibility == Visibility.Visible)
+				{
+					widget.Visibility = Visibility.Hidden;
+					m_canvas.Children.Remove(widget);
+				}
+				return;
+			}
+
+			++drawn;
+
+			if (widget.Visibility == Visibility.Hidden)
+			{
+				m_canvas.Children.Add(widget);
+				widget.Visibility = Visibility.Visible;
+			}
+
+			widget.Width = desiredWith;
+			Canvas.SetTop(widget, desiredY);
+			Canvas.SetLeft(widget, desiredX);
 		}
 	}
 
@@ -631,7 +640,7 @@ namespace ImWpf
 				//vec.y += 3.2f;
 				//vec.z += 123.0f;
 
-				for (int i = 0; i < 10; ++i)
+				for (int i = 0; i < 10000; ++i)
 				{
 					m_layout.EditVec3("Position", vec, null);
 				}
