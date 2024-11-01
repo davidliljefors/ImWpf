@@ -212,21 +212,14 @@ namespace ImWpf
 
 			public void CollectPaths()
 			{
-				m_paths = FileCollector.GetAllFilePaths("C:\\dev\\beluga");
+				m_paths = FileCollector.GetAllFilePaths("C:\\dev\\");
 			}
 
-			public void Redraw()
+			public void DrawGcStats()
 			{
-
-
 				int gen0 = GC.CollectionCount(0);
 				int gen1 = GC.CollectionCount(1);
 				int gen2 = GC.CollectionCount(2);
-
-				// Get the total memory used
-
-				m_layout.Begin();
-
 				long totalMemory = GC.GetTotalMemory(false);
 
 				m_layout.Button("Testbutton line 1", ()=>{}, new Layout());
@@ -235,33 +228,26 @@ namespace ImWpf
 
 				m_layout.Label("GC Statistics:", new Layout());
 				m_layout.Label($"  Collections (Gen 0): {gen0}", new Layout());
-				m_layout.Label($"  Collections (Gen 0): {gen1}", new Layout());
-				m_layout.Label($"  Collections (Gen 0): {gen2}", new Layout());
+				m_layout.Label($"  Collections (Gen 1): {gen1}", new Layout());
+				m_layout.Label($"  Collections (Gen 2): {gen2}", new Layout());
 				m_layout.Label($"  Total Memory Used: {totalMemory / (1024)} KB", new Layout());
+			}
 
-				//m_layout.Label("Position", Layout.FixedWidth(60, true));
-				//m_layout.Button("TestSameLine 2", () => { }, Layout.RelativeWidth(0.5, true));
-				//m_layout.Button("TestSameLine 3", () => { }, new Layout());
-				//m_layout.Button("TestNextLine 1", () => { }, new Layout());
-
-				//m_layout.Label($"Reused {m_layout.Reused} and created {m_layout.Created}", new Layout());
-
-				//vec.x += 1.23f;
-				//vec.y += 3.2f;
-				//vec.z += 123.0f;
+			public void Redraw()
+			{
+				m_layout.Begin();
 
 				m_layout.EditText("Search...", m_searchPattern, new Layout(), (string s) => {
 					m_searchPattern = s;
 				});
 
 				m_layout.Label(m_searchPattern, new Layout());
-				
 
-				foreach(var path in FileCollector.FilterBySubstring(m_paths, m_searchPattern))
+				foreach(var path in FileCollector.FilterBySubstring(m_paths, m_searchPattern).Take(100))
 				{
 					m_layout.Label(path, new Layout());
 				}
-
+				
 				m_layout.End();
 			}
 		}
@@ -291,24 +277,24 @@ namespace ImWpf
 			layout.BindRedrawFunc(updateLoop.Redraw);
 			updateLoop.Redraw();
 
-			ControlWindow controlWindow = new(new Window());
+			//ControlWindow controlWindow = new(new Window());
 
-			controlWindow.AddButton("Redraw", () =>
-			{
-				updateLoop.Redraw();
-			});
+			// controlWindow.AddButton("Redraw", () =>
+			// {
+			// 	updateLoop.Redraw();
+			// });
 
-			controlWindow.AddButton("Remove Widget", () =>
-			{
-				//layout.RemoveWidget(nextButton);
-			});
+			// controlWindow.AddButton("Remove Widget", () =>
+			// {
+			// 	//layout.RemoveWidget(nextButton);
+			// });
 
-			controlWindow.AddText((string val) =>
-			{
-				//nextButton = val;
-			});
+			// controlWindow.AddText((string val) =>
+			// {
+			// 	//nextButton = val;
+			// });
 
-			controlWindow.Show();
+			// controlWindow.Show();
 
 			rootWindow.Width = 600;
 			rootWindow.Height = 800;

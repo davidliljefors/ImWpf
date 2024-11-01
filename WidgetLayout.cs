@@ -120,7 +120,7 @@ public class WidgetLayout
                 m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
             }
 
-            m_canvas.Height = m_lastHeight;
+            m_canvas.Height = Math.Max(m_lastHeight, m_scrollView.ActualHeight);
             needUpdate = true;
         }
 
