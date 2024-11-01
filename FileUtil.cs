@@ -45,9 +45,9 @@ public class FileCollector
         return filePaths;
     }
 
-    public static List<string> FilterBySubstring(List<string> inputList, string searchString)
+    public static void FilterBySubstring(List<string> inputList, string searchString, ref List<String> results)
     {
-        var results = new List<string>();
+        results.Clear();
 
         // Split the search string on spaces
         var searchTerms = searchString.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -71,7 +71,5 @@ public class FileCollector
                 results.Add(item);
             }
         }
-
-        return results;
     }
 }

@@ -208,6 +208,7 @@ namespace ImWpf
 			private Entity[] m_entities = new Entity[10];
 			private Vec3 vec = new();
 			private List<string> m_paths = new();
+			private List<string> m_results = new();
 			private string m_searchPattern = "";
 
 			public void CollectPaths()
@@ -240,16 +241,24 @@ namespace ImWpf
 				m_layout.EditText("Search...", m_searchPattern, new Layout(), (string s) => {
 					m_searchPattern = s;
 				});
-
+				
+				m_layout.Label($"Drawn {drawn} Culled {culled}", new Layout());
+				
 				m_layout.Label(m_searchPattern, new Layout());
 
-				foreach(var path in FileCollector.FilterBySubstring(m_paths, m_searchPattern).Take(100))
+				FileCollector.FilterBySubstring(m_paths, m_searchPattern, ref m_results);
+
+				foreach(var path in m_results.Take(1000))
 				{
-					m_layout.Label(path, new Layout());
+					m_layout.Button(path, ()=>{}, new Layout());
 				}
-				
+
 				m_layout.End();
+				culled = m_layout.culled;
+				drawn = m_layout.drawn;
 			}
+			int culled = 0;
+			int drawn = 0;
 		}
 
 		[DllImport("kernel32.dll")]
@@ -261,14 +270,14 @@ namespace ImWpf
 			AllocConsole();
 			Application app = new Application();
 
-			var lunaTheme = new ResourceDictionary
-			{
-				Source = new Uri(
-					"pack://application:,,,/PresentationFramework.Luna;component/themes/Luna.NormalColor.xaml",
-					UriKind.Absolute)
-			};
-			app.Resources.MergedDictionaries.Clear();
-			app.Resources.MergedDictionaries.Add(lunaTheme);
+			// var lunaTheme = new ResourceDictionary
+			// {
+			// 	Source = new Uri(
+			// 		"pack://application:,,,/PresentationFramework.Luna;component/themes/Luna.NormalColor.xaml",
+			// 		UriKind.Absolute)
+			// };
+			// app.Resources.MergedDictionaries.Clear();
+			// app.Resources.MergedDictionaries.Add(lunaTheme);
 
 			Window rootWindow = new();
 			WidgetLayout layout = new(rootWindow);

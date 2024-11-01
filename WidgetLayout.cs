@@ -170,8 +170,8 @@ public class WidgetLayout
     public int Reused = 0;
     public int Created = 0;
 
-    private int culled = 0;
-    private int drawn = 0;
+    public int culled = 0;
+    public int drawn = 0;
 
     private static bool CullElement(Rect rect, ScrollViewer sv, Canvas canvas)
     {
@@ -247,6 +247,10 @@ public class WidgetLayout
         m_rebuildState = XXH3Value(ref callerHash, m_rebuildState);
 
         Button button = GetOrCreateWidget<Button>(callerHash, label);
+        if (!string.Equals((string)button.Content, label))
+        {
+            button.Content = label;
+        }
         SetElementPositionAndMoveCursor(layout, button, ref m_cursorX, ref m_cursorY, m_canvas.Width);
     }
 
