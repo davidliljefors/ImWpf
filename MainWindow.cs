@@ -248,7 +248,7 @@ namespace ImWpf
 
 				FileCollector.FilterBySubstring(m_paths, m_searchPattern, ref m_results);
 
-				foreach(var path in m_results.Take(1000))
+				foreach(var path in m_results.Take(10))
 				{
 					m_layout.Button(path, ()=>{}, new Layout());
 				}

@@ -7,29 +7,23 @@ public class FileCollector
     public static List<string> GetAllFilePaths(string rootPath)
     {
         var filePaths = new List<string>();
-        var directories = new Stack<string>();
+        var directories = new List<string>();
 
         // Start with the root directory
-        directories.Push(rootPath);
+        directories.Add(rootPath);
 
         while (directories.Count > 0)
         {
             // Pop a directory from the stack
-            var currentDir = directories.Pop();
+            int last = directories.Count-1;
+            var currentDir = directories[last];
+            directories.RemoveAt(last);
 
             try
             {
                 // Collect all files in the current directory
-                foreach (var file in Directory.EnumerateFiles(currentDir))
-                {
-                    filePaths.Add(file);
-                }
-
-                // Push all subdirectories onto the stack
-                foreach (var dir in Directory.EnumerateDirectories(currentDir))
-                {
-                    directories.Push(dir);
-                }
+                filePaths.AddRange(Directory.GetFiles(currentDir));
+                directories.AddRange(Directory.GetDirectories(currentDir));
             }
             catch (UnauthorizedAccessException)
             {

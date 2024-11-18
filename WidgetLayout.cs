@@ -109,6 +109,12 @@ public class WidgetLayout
             m_editFlag = false;
         }
 
+        if(m_canvas.Height < m_scrollView.ActualHeight)
+        {
+            m_canvas.Height = Math.Max(m_lastHeight, m_scrollView.ActualHeight);
+            needUpdate = true;
+        }
+
         if (Math.Abs(m_canvas.Height - m_lastHeight) > 0.1)
         {
             if (m_scrollView.ViewportHeight < m_lastHeight)
