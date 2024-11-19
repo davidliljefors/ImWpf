@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 
 namespace Example
 {
-	public struct Vec3
+	public struct Vector3
 	{
-		public float x;
-		public float y;
-		public float z;
+		public float X;
+		public float Y;
+		public float Z;
 	}
 
 	public struct Color
@@ -23,45 +23,13 @@ namespace Example
 	{
 		public string name;
 		public Color color;
-		public Vec3 position;
+		public Vector3 position;
 	}
 }
 
 namespace ImWpf
 {
 	using u64 = UInt64;
-
-	public struct Layout
-	{
-		public double width = 1.0;
-		public bool absolute = false;
-		public bool nextOnSameLine = false;
-
-        public Layout()
-        {
-			width = 1.0;
-			absolute = false;
-			nextOnSameLine = false;
-        }
-
-        public static Layout FixedWidth(double width, bool nextOnSameLine)
-		{
-			Layout size = new();
-			size.width = width;
-			size.absolute = true;
-			size.nextOnSameLine = nextOnSameLine;
-			return size;
-		}
-
-		public static Layout RelativeWidth(double width, bool nextOnSameLine)
-		{
-			Layout size = new();
-			size.width = width;
-			size.absolute = false;
-			size.nextOnSameLine = nextOnSameLine;
-			return size;
-		}
-	}
 
 	public class ManualLayoutCanvas : Canvas
 	{
@@ -206,14 +174,14 @@ namespace ImWpf
 		{
 			private readonly WidgetLayout m_layout = layout;
 			private Entity[] m_entities = new Entity[10];
-			private Vec3 vec = new();
+			private Vector3 vec = new();
 			private List<string> m_paths = new();
 			private List<string> m_results = new();
 			private string m_searchPattern = "";
 
 			public void CollectPaths()
 			{
-				m_paths = FileCollector.GetAllFilePaths("C:\\dev\\");
+				m_paths = FileCollector.GetAllFilePaths("C:\\Users\\dliljefors\\Desktop\\crash-explorer");
 			}
 
 			public void DrawGcStats()
@@ -238,24 +206,40 @@ namespace ImWpf
 			{
 				m_layout.Begin();
 
-				m_layout.EditText("Search...", m_searchPattern, new Layout(), (string s) => {
+				m_layout.EditText("Search...", m_searchPattern, new Layout(), (string s) =>
+				{
 					m_searchPattern = s;
 				});
-				
+
+
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+				m_layout.Label("Testbutton line 1", new Layout());
+
 				m_layout.Label($"Drawn {drawn} Culled {culled}", new Layout());
-				
+
+
 				m_layout.Label(m_searchPattern, new Layout());
 
 				FileCollector.FilterBySubstring(m_paths, m_searchPattern, ref m_results);
 
-				foreach(var path in m_results.Take(10))
+				foreach (var path in m_results.Take(3))
 				{
-					m_layout.Button(path, ()=>{}, new Layout());
+					m_layout.Button(path, () => { }, new Layout());
 				}
 
 				m_layout.End();
-				culled = m_layout.culled;
-				drawn = m_layout.drawn;
 			}
 			int culled = 0;
 			int drawn = 0;

@@ -1,36 +1,75 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
-using Example;
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.Xml;
 using System.Windows.Shapes;
+using Example;
 
 namespace ImWpf;
 using u64 = UInt64;
 
+public struct Layout
+{
+	public double width = 1.0;
+	public bool absolute = false;
+	public bool nextOnSameLine = false;
+
+    public Layout()
+    {
+		width = 1.0;
+		absolute = false;
+		nextOnSameLine = false;
+    }
+
+    public static Layout FixedWidth(double width, bool nextOnSameLine)
+	{
+		Layout size = new();
+		size.width = width;
+		size.absolute = true;
+		size.nextOnSameLine = nextOnSameLine;
+		return size;
+	}
+
+	public static Layout RelativeWidth(double width, bool nextOnSameLine)
+	{
+		Layout size = new();
+		size.width = width;
+		size.absolute = false;
+		size.nextOnSameLine = nextOnSameLine;
+		return size;
+	}
+}
+
 public class WidgetLayout
 {
     private const bool kEnableCulling = true;
+    private const bool kAlwaysShowScrollbar = true;
 
-    private struct WidgetHolder
+    enum WidgetType
+    {
+		None,
+		Button,
+		Label,
+		Textbox,
+
+    }
+
+    private class WidgetHolder
     {
         public FrameworkElement widget;
         public u64 lastState;
-
+        public WidgetType type;
         public Action<string> OnTextEdit;
+        public Action OnClicked;
     }
 
-    private struct AddedWidget
-    {
-        public WidgetHolder widgetHolder;
-        public int index;
-    }
 
     private const double kLineHeight = 32;
     private const double kMargin = 4;
@@ -39,25 +78,29 @@ public class WidgetLayout
     private double m_cursorY;
 
     private readonly ScrollViewer m_scrollView;
-    private readonly Canvas m_canvas;
-    private readonly List<WidgetHolder> m_lastWidgets = new();
-    private readonly List<AddedWidget> m_addedWidgets = new();
-    private int m_index;
-    private int m_consumeIndex;
+    public readonly Canvas m_canvas;
     private double m_lastHeight;
     private bool m_editFlag = false;
 
+	//private List<Button> m_pooledButtons = new();
+    //private List<Label> m_pooledLabels = new();
+
+    private Dictionary<u64, WidgetHolder> m_lastWidgets = new();
+    private Dictionary<u64, WidgetHolder> m_currentWidgets = new();
+
+
     private Action m_redraw;
-    private Window m_root;
+    private ContentControl m_root;
     private u64 m_rebuildState = 0;
 
-    public WidgetLayout(Window root)
+
+    public WidgetLayout(ContentControl root)
     {
         m_redraw = () => { };
         m_root = root;
         // Scroll Viewer
         m_scrollView = new ScrollViewer();
-        m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Visible;
 
         m_canvas = new Canvas
         {
@@ -89,18 +132,17 @@ public class WidgetLayout
 
     private RenderState m_lastState = new RenderState();
 
-    private void Render(object? _, EventArgs __)
+    private void Render(object _, EventArgs __)
     {
         bool needUpdate = false;
 
         RenderState state = new RenderState
         {
             ScrollOffsetY = m_scrollView.VerticalOffset,
-            WindowSizeX = m_root.Width,
-            WindowSizeY = m_root.Height,
+            WindowSizeX = m_root.ActualWidth,
+            WindowSizeY = m_root.ActualHeight,
         };
 
-        var prevScrollbar = m_scrollView.VerticalScrollBarVisibility;
 
         if (m_lastState != state || m_editFlag)
         {
@@ -117,17 +159,7 @@ public class WidgetLayout
 
         if (Math.Abs(m_canvas.Height - m_lastHeight) > 0.1)
         {
-            if (m_scrollView.ViewportHeight < m_lastHeight)
-            {
-                m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Visible;
-            }
-            else
-            {
-                m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
-            }
-
             m_canvas.Height = Math.Max(m_lastHeight, m_scrollView.ActualHeight);
-            needUpdate = true;
         }
 
         if (Math.Abs(m_scrollView.VerticalOffset - m_lastVerticalOffset) > 0.1)
@@ -142,17 +174,7 @@ public class WidgetLayout
             needUpdate = true;
         }
 
-        if (prevScrollbar != m_scrollView.VerticalScrollBarVisibility)
-        {
-            if (prevScrollbar == ScrollBarVisibility.Hidden)
-            {
-                m_canvas.Width -= SystemParameters.VerticalScrollBarWidth;
-            }
-            if (prevScrollbar == ScrollBarVisibility.Visible)
-            {
-                m_canvas.Width += SystemParameters.VerticalScrollBarWidth;
-            }
-        }
+        
 
         if (needUpdate)
         {
@@ -162,22 +184,11 @@ public class WidgetLayout
 
     public void Begin()
     {
-        culled = 0;
-        drawn = 0;
         m_canvas.Visibility = Visibility.Hidden;
         m_rebuildState = 0;
         m_cursorX = kMargin;
         m_cursorY = kMargin;
-
-        m_index = 0;
-        m_consumeIndex = 0;
     }
-
-    public int Reused = 0;
-    public int Created = 0;
-
-    public int culled = 0;
-    public int drawn = 0;
 
     private static bool CullElement(Rect rect, ScrollViewer sv, Canvas canvas)
     {
@@ -189,41 +200,27 @@ public class WidgetLayout
         viewportRect.X += offsetX;
         viewportRect.Y += offsetY;
 
-        return !viewportRect.IntersectsWith(rect); ;
+        return !viewportRect.IntersectsWith(rect);
     }
 
     public void End()
     {
-        Reused = m_lastWidgets.Count;
-        Created = m_addedWidgets.Count;
-
         m_cursorY += kLineHeight;
 
-        foreach (AddedWidget widget in m_addedWidgets)
-        {
-            m_lastWidgets.Insert(widget.index, widget.widgetHolder);
-        }
-
-        var lastIndex = m_index-1;
-
         m_lastHeight = m_cursorY;
-        m_addedWidgets.Clear();
 
-        for(int i = m_lastWidgets.Count-1; i > lastIndex; --i)
+        foreach (var value in m_lastWidgets)
         {
-            m_canvas.Children.Remove(m_lastWidgets[i].widget);
-            m_lastWidgets.RemoveAt(i);
+			m_canvas.Children.Remove(value.Value.widget);
         }
+        m_lastWidgets.Clear();
 
-        if(lastIndex < m_lastWidgets.Count-1)
-        {
-            m_lastWidgets.RemoveRange(lastIndex, m_lastWidgets.Count-1);
-        }
+        (m_lastWidgets, m_currentWidgets) = (m_currentWidgets, m_lastWidgets);
 
         m_canvas.Visibility = Visibility.Visible;
     }
 
-    public Vec3 EditVec3(string label, Vec3 value, Action<Vec3> onEdit, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
+    public Vector3 EditVec3(string label, Vector3 value, Action<Vector3> onEdit, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
     {
         u64 callerStateHash = XXH3String(caller, (u64)lineNum);
         u64 hLabel = XXH3Value(callerStateHash, m_rebuildState);
@@ -232,45 +229,64 @@ public class WidgetLayout
         u64 hText3 = XXH3Value(0xF0F0, hText2);
         m_rebuildState = hText3;
 
-        var labelWidget = GetOrCreateWidget<Button>(hLabel, label);
-        SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.2, true), labelWidget, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+        var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(0.2, true), ref m_cursorX, ref m_cursorY, m_canvas.Width);
 
-        var editX = GetOrCreateWidget<Button>(hText1, value.x.ToString("F2"));
-        SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.333, true), editX, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+        if (labelVisible == false)
+	        HideCulledWidget(FindWidget<Button>(hLabel));
+        else
+	        ApplyWidgetRect(GetOrCreateWidget<Button>(hLabel, label).Item2.widget, labelRect);
 
-        var editY = GetOrCreateWidget<Button>(hText2, value.y.ToString("F2"));
-        SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.50, true), editY, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		var (xVisible, xRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(0.333, true), ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		if (xVisible == false)
+			HideCulledWidget(FindWidget<Button>(hText1));
+		else
+			ApplyWidgetRect(GetOrCreateWidget<Button>(hText1, value.X.ToString("F2")).Item2.widget, xRect);
 
-        var editZ = GetOrCreateWidget<Button>(hText3, value.z.ToString("F2"));
-        SetElementPositionAndMoveCursor(Layout.RelativeWidth(1.0, false), editZ, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		var (yVisible, yRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(0.5, true), ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		if (yVisible == false)
+			HideCulledWidget(FindWidget<Button>(hText2));
+		else
+			ApplyWidgetRect(GetOrCreateWidget<Button>(hText2, value.X.ToString("F2")).Item2.widget, yRect);
+
+		var (zVisible, zRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(1.0, false), ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		if (zVisible == false)
+			HideCulledWidget(FindWidget<Button>(hText3));
+		else
+			ApplyWidgetRect(GetOrCreateWidget<Button>(hText3, value.X.ToString("F2")).Item2.widget, zRect);
 
         return value;
     }
 
     public void Button(string label, Action onClicked, Layout layout, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
     {
-        u64 callerHash = XXH3String(caller, (u64)lineNum);
-        m_rebuildState = XXH3Value(ref callerHash, m_rebuildState);
+        u64 hState = XXH3String(caller, m_rebuildState);
+        hState = XXH3String(label, hState);
+        hState = XXH3Value((u64)lineNum, hState);
 
-        Button button = GetOrCreateWidget<Button>(callerHash, label);
-        if (!string.Equals((string)button.Content, label))
+        m_rebuildState = hState;
+
+        var (buttonVisible, buttonRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+        if (buttonVisible == false)
         {
-            button.Content = label;
+	        HideCulledWidget(FindWidget<Button>(hState));
+	        return;
         }
-        SetElementPositionAndMoveCursor(layout, button, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+
+        var (reused, holder) = GetOrCreateButton(hState, label, onClicked);
+		ApplyWidgetRect(holder.widget, buttonRect);
     }
 
     public void Label(string label, Layout layout, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
     {
-        u64 callerHash = XXH3String(caller, (u64)lineNum);
-        m_rebuildState = XXH3Value(ref callerHash, m_rebuildState);
+	    u64 callerHash = XXH3String(caller, (u64)lineNum);
+	    u64 hLabel = XXH3Value(callerHash, m_rebuildState);
+	    m_rebuildState = hLabel;
 
-        Label textLabel = GetOrCreateWidget<Label>(callerHash, label);
-        if (!string.Equals((string)textLabel.Content, label))
-        {
-            textLabel.Content = label;
-        }
-        SetElementPositionAndMoveCursor(layout, textLabel, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+        var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+        if (labelVisible == false)
+	        HideCulledWidget(FindWidget<Label>(hLabel));
+        else
+	        ApplyWidgetRect(GetOrCreateWidget<Label>(hLabel, label).Item2.widget, labelRect);
     }
 
     public void Text(string label)
@@ -285,116 +301,172 @@ public class WidgetLayout
         u64 hText1 = XXH3Value(0xEAEA, hLabel);
         m_rebuildState = XXH3Value(ref callerStateHash, m_rebuildState);
 
-        var labelWidget = GetOrCreateWidget<Button>(hLabel, label);
-        SetElementPositionAndMoveCursor(Layout.RelativeWidth(0.2, true), labelWidget, ref m_cursorX, ref m_cursorY, m_canvas.Width);
-        
-        TextBox textBox = GetOrCreateTextbox(hText1, content, onEdit);
-        SetElementPositionAndMoveCursor(layout, textBox, ref m_cursorX, ref m_cursorY, m_canvas.Width);
-    }
+        var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(0.3, true), ref m_cursorX, ref m_cursorY, m_canvas.Width);
+        if (labelVisible == false)
+			HideCulledWidget(FindWidget<Label>(hLabel));
+        else
+	        ApplyWidgetRect(GetOrCreateWidget<Label>(hLabel, label).Item2.widget, labelRect);
 
-    private void OnEdit()
-    {
 
-    }
-
-    private T GetOrCreateWidget<T>(u64 hash, string content) where T : ContentControl, new()
-    {
-        if (m_consumeIndex < m_lastWidgets.Count)
+        var (contentVisible, contentRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+        if (contentVisible == false)
         {
-            if (m_lastWidgets[m_consumeIndex].lastState == hash)
-            {
-                var read = m_consumeIndex;
-                m_consumeIndex++;
-                m_index++;
-                return (T)m_lastWidgets[read].widget;
-            }
+	        HideCulledWidget(FindWidget<TextBox>(hText1));
+	        return;
         }
 
-        T widget = new T
-        {
-            Content = content
-        };
 
-        var addedWidget = new AddedWidget();
-        addedWidget.index = m_index;
-        addedWidget.widgetHolder = new WidgetHolder { lastState = hash, widget = widget };
-        m_index++;
+        var (reusedTextbox, contentHolder) = GetOrCreateTextbox(hText1, content, onEdit);
+        ApplyWidgetRect(contentHolder.widget, contentRect);
+	}
 
-        m_addedWidgets.Add(addedWidget);
-        m_canvas.Children.Add(widget);
+    private bool FindWidgetHolder<T>(u64 hash, out WidgetHolder holder) where T : FrameworkElement, new()
+    {
+		if(m_lastWidgets.TryGetValue(hash, out var reusedHolder))
+		{
+			holder = reusedHolder;
+			m_lastWidgets.Remove(hash);
+			m_currentWidgets.Add(hash, reusedHolder);
+			return true;
+		}
 
-        return widget;
+		holder = null;
+	    return false;
     }
 
-    private Rectangle GetOrCreateRect(u64 hash, string _)
+    private T FindWidget<T>(u64 hash) where T : FrameworkElement, new()
     {
-        if (m_consumeIndex < m_lastWidgets.Count)
-        {
-            if (m_lastWidgets[m_consumeIndex].lastState == hash)
-            {
-                var read = m_consumeIndex;
-                m_consumeIndex++;
-                m_index++;
-                return (Rectangle)m_lastWidgets[read].widget;
-            }
-        }
+	    if (FindWidgetHolder<T>(hash, out var holder))
+	    {
+		    return (T)holder.widget;
+	    }
 
-        Rectangle widget = new Rectangle
-        {
-            Fill = Brushes.Blue
-        };
-
-        var addedWidget = new AddedWidget();
-        addedWidget.index = m_index;
-        addedWidget.widgetHolder = new WidgetHolder { lastState = hash, widget = widget };
-        m_index++;
-
-        m_addedWidgets.Add(addedWidget);
-        m_canvas.Children.Add(widget);
-
-        return widget;
+	    return null;
     }
 
-    private TextBox GetOrCreateTextbox(u64 hash, string content, Action<string> onEdit)
+    private (bool, WidgetHolder) GetOrCreateButton(u64 hash, string content, Action onClicked)
     {
-        if (m_consumeIndex < m_lastWidgets.Count)
+	    if(FindWidgetHolder<Button>(hash, out WidgetHolder holder))
+	    {
+		    Button old = (Button)holder.widget;
+		    if(!string.Equals(old.Content as string, content))
+		    {
+			    old.Content = content;
+				holder.OnClicked = onClicked;
+		    }
+		    return (true, holder);
+	    }
+
+	    Button widget = new Button();
+		widget.Click += Button_Click;
+	    widget.Content = content;
+
+		var newHolder = new WidgetHolder { lastState = hash, widget = widget, type = WidgetType.Button, OnClicked = onClicked};
+	    m_canvas.Children.Add(widget);
+		m_currentWidgets.Add(hash, newHolder);
+
+	    return (false, newHolder);
+    }
+
+    private (bool, WidgetHolder) GetOrCreateWidget<T>(u64 hash, string content) where T : ContentControl, new()
+    {
+	    if(FindWidgetHolder<T>(hash, out WidgetHolder holder))
+	    {
+		    T old = (T)holder.widget;
+			if(!Equals(old.Content,content))
+			{
+				old.Content = content;
+			}
+		    return (true, holder);
+	    }
+
+	    T widget = new T();
+	    widget.Content = content;
+
+	    var newHolder = new WidgetHolder { lastState = hash, widget = widget, type = GetTypeFromWidget<T>()};
+        m_canvas.Children.Add(widget);
+        m_currentWidgets.Add(hash, newHolder);
+
+        return (false, newHolder);
+    }
+
+	//private Rectangle GetOrCreateRect(u64 hash, string _)
+ //   {
+ //       if (m_consumeIndex < m_lastWidgets.Count)
+ //       {
+ //           if (m_lastWidgets[m_consumeIndex].lastState == hash)
+ //           {
+ //               var read = m_consumeIndex;
+ //               m_consumeIndex++;
+ //               m_index++;
+ //               return (Rectangle)m_lastWidgets[read].widget;
+ //           }
+ //       }
+
+ //       Rectangle widget = new Rectangle
+ //       {
+ //           Fill = Brushes.Blue
+ //       };
+
+ //       var addedWidget = new AddedWidget();
+ //       addedWidget.index = m_index;
+ //       addedWidget.widgetHolder = new WidgetHolder { lastState = hash, widget = widget };
+ //       m_index++;
+
+ //       m_addedWidgets.Add(addedWidget);
+ //       m_canvas.Children.Add(widget);
+
+ //       return widget;
+ //   }
+
+    private (bool, WidgetHolder) GetOrCreateTextbox(u64 hash, string text, Action<string> onEdit)
+    {
+        if (FindWidgetHolder<TextBox>(hash, out var holder))
         {
-            if (m_lastWidgets[m_consumeIndex].lastState == hash)
-            {
-                var read = m_consumeIndex;
-                m_consumeIndex++;
-                m_index++;
-                return (TextBox)m_lastWidgets[read].widget;
-            }
+	        TextBox old = (TextBox)holder.widget;
+	        if(!Equals(old.Text,text))
+	        {
+		        old.Text = text;
+	        }
+	        return (true, holder);
         }
 
         TextBox widget = new TextBox
         {
-            Text = content,
+            Text = text,
             VerticalContentAlignment = VerticalAlignment.Center
         };
 
         widget.TextChanged += TextBox_TextChanged;
 
-        var addedWidget = new AddedWidget();
-        addedWidget.index = m_index;
-        addedWidget.widgetHolder = new WidgetHolder { lastState = hash, widget = widget, OnTextEdit = onEdit };
-        m_index++;
-
-        m_addedWidgets.Add(addedWidget);
+        var newHolder = new WidgetHolder { lastState = hash, widget = widget, OnTextEdit = onEdit };
         m_canvas.Children.Add(widget);
+		m_currentWidgets.Add(hash, newHolder);
 
-        return widget;
+        return (false, newHolder);
+    }
+
+    
+    private void Button_Click(object sender, RoutedEventArgs e)
+    {
+	    foreach(var widget in m_currentWidgets)
+	    {
+		    if(widget.Value.widget == sender)
+		    {
+			    widget.Value.OnClicked();
+		    }
+	    }
+	    m_editFlag = true;
     }
 
     private void TextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         foreach(var widget in m_lastWidgets)
         {
-            if(widget.widget == sender)
-            {
+	        if(widget.Value.widget == sender)
+	        {
                 var tb = e.OriginalSource as TextBox;
-                widget.OnTextEdit(tb.Text);
+                widget.Value.OnTextEdit(tb.Text);
             }
         }
 
@@ -460,7 +532,6 @@ public class WidgetLayout
 
         if (CullElement(rect, m_scrollView, m_canvas) && kEnableCulling)
         {
-            ++culled;
             if (widget.Visibility == Visibility.Visible)
             {
                 widget.Visibility = Visibility.Hidden;
@@ -468,8 +539,6 @@ public class WidgetLayout
             }
             return;
         }
-
-        ++drawn;
 
         if (widget.Visibility == Visibility.Hidden)
         {
@@ -480,5 +549,107 @@ public class WidgetLayout
         widget.Width = desiredWith;
         Canvas.SetTop(widget, desiredY);
         Canvas.SetLeft(widget, desiredX);
+    }
+
+    private (bool visible, Rect rect) GetWidgetRectAndMoveCursor(Layout layout, ref double curX, ref double curY, double lineWidth)
+    {
+	    double desiredWith = 0;
+	    double desiredX = curX;
+	    double desiredY = curY;
+	    if (layout.absolute)
+	    {
+		    desiredWith = layout.width;
+	    }
+	    else
+	    {
+		    double remainingWidth = Math.Max(lineWidth - curX - kMargin / 2, 0);
+		    desiredWith = remainingWidth * layout.width;
+	    }
+
+	    curX += desiredWith + kMargin;
+
+	    Rect rect = new();
+
+	    rect.X = desiredX;
+	    rect.Y = desiredY;
+	    rect.Width = desiredWith;
+	    rect.Height = kLineHeight;
+
+	    if (!layout.nextOnSameLine)
+	    {
+		    curX = kMargin;
+		    curY += kLineHeight;
+	    }
+
+	    if (CullElement(rect, m_scrollView, m_canvas) && kEnableCulling)
+	    {
+		    return (false, rect);
+	    }
+
+	    return (true, rect);
+	    
+    }
+
+    private void HideCulledWidget(FrameworkElement widget)
+    {
+	    if (widget == null)
+		    return;
+
+	    if (widget.Visibility == Visibility.Hidden)
+		    return;
+
+	    widget.Visibility = Visibility.Hidden;
+	    m_canvas.Children.Remove(widget);
+    }
+
+	private void ApplyWidgetRect(FrameworkElement widget, Rect rect)
+	{
+		if (widget.Visibility == Visibility.Hidden)
+		{
+			m_canvas.Children.Add(widget);
+			widget.Visibility = Visibility.Visible;
+		}
+
+		widget.Height = rect.Height-kMargin;
+		//if (Math.Abs(rect.Height - widget.Height) > 0.01)
+
+		widget.Width = rect.Width;
+		//if (Math.Abs(rect.Width - widget.Width) > 0.01)
+
+		Canvas.SetTop(widget, rect.Y);
+		Canvas.SetLeft(widget, rect.X);
+	}
+
+	private void PoolWidget(WidgetHolder widget)
+	{
+		//if (widget.type == WidgetType.Button)
+		{
+			//widget.widget.Visibility = Visibility.Hidden;
+			//m_pooledButtons.Add((Button)widget.widget);
+		}
+	}
+
+	private object GetPooledWidget<T>()
+	{
+		return null;
+	}
+
+	private static WidgetType GetTypeFromWidget<T>()
+	{
+		if (typeof(T) == typeof(Button))
+			return WidgetType.Button;
+
+		if (typeof(T) == typeof(Label))
+			return WidgetType.Label;
+
+		if (typeof(T) == typeof(TextBox))
+			return WidgetType.Textbox;
+
+		return WidgetType.None;
+	}
+
+    public void MarkEdit()
+    {
+	    m_editFlag = true;
     }
 }
