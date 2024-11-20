@@ -175,13 +175,13 @@ namespace ImWpf
 			private readonly WidgetLayout m_layout = layout;
 			private Entity[] m_entities = new Entity[10];
 			private Vector3 vec = new();
-			private List<string> m_paths = new();
-			private List<string> m_results = new();
+			private List<(string, string)> m_paths = new();
+			private List<(string, string)> m_results = new();
 			private string m_searchPattern = "";
 
 			public void CollectPaths()
 			{
-				m_paths = FileCollector.GetAllFilePaths("C:\\Users\\dliljefors\\Desktop\\crash-explorer");
+				m_paths = FileCollector.GetFiles2("C:\\dev");
 			}
 
 			public void DrawGcStats()
@@ -209,34 +209,18 @@ namespace ImWpf
 				m_layout.EditText("Search...", m_searchPattern, new Layout(), (string s) =>
 				{
 					m_searchPattern = s;
-				});
+				}, () => {});
 
 
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-				m_layout.Label("Testbutton line 1", new Layout());
-
-				m_layout.Label($"Drawn {drawn} Culled {culled}", new Layout());
-
+				m_layout.Label($"Found {m_results.Count} files", new Layout());
 
 				m_layout.Label(m_searchPattern, new Layout());
 
 				FileCollector.FilterBySubstring(m_paths, m_searchPattern, ref m_results);
 
-				foreach (var path in m_results.Take(3))
+				foreach (var path in m_results.Take(10000))
 				{
-					m_layout.Button(path, () => { }, new Layout());
+					m_layout.Button(path.Item2, () => { Console.WriteLine($"Open file {path.Item1 + '\\' + path.Item2}"); }, new Layout());
 				}
 
 				m_layout.End();

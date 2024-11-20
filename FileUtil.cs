@@ -39,7 +39,16 @@ public class FileCollector
         return filePaths;
     }
 
-    public static void FilterBySubstring(List<string> inputList, string searchString, ref List<String> results)
+    public static List<(string, string)> GetFiles2(string directory)
+    {
+	    var folder=new DirectoryInfo(directory);
+	    var files=from file in folder.EnumerateFiles("*.*", SearchOption.AllDirectories)
+		    select (file.DirectoryName, file.Name);
+
+	    return files.ToList();
+    }
+
+    public static void FilterBySubstring(List<(string, string)> inputList, string searchString, ref List<(string, string)> results)
     {
         results.Clear();
 
@@ -53,7 +62,7 @@ public class FileCollector
             // Check if each search term is a substring in the item
             foreach (var term in searchTerms)
             {
-                if (!item.Contains(term, StringComparison.OrdinalIgnoreCase))
+                if (!item.Item2.Contains(term, StringComparison.OrdinalIgnoreCase))
                 {
                     isMatch = false;
                     break;
