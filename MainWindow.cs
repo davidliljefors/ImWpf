@@ -1,183 +1,20 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
-using Example;
 using System.Runtime.InteropServices;
-
-namespace Example
-{
-	public struct Vector3
-	{
-		public float X;
-		public float Y;
-		public float Z;
-	}
-
-	public struct Color
-	{
-		public float r;
-		public float g;
-		public float b;
-	}
-
-	public struct Entity
-	{
-		public string name;
-		public Color color;
-		public Vector3 position;
-	}
-}
 
 namespace ImWpf
 {
 	using u64 = UInt64;
-
-	public class ManualLayoutCanvas : Canvas
-	{
-		public Size size;
-		protected override Size MeasureOverride(Size availableSize)
-		{
-			return availableSize;
-		}
-
-		protected override Size ArrangeOverride(Size finalSize)
-		{
-			double totalWidth = finalSize.Width;
-			double totalHeight = finalSize.Height;
-
-			// Cache values for arrangement
-			double childWidth = totalWidth / Children.Count; // Example calculation
-
-			// Calculate arrangement positions
-			Rect[] arrangementRectangles = new Rect[Children.Count];
-
-			for (int i = 0; i < Children.Count; i++)
-			{
-				arrangementRectangles[i] = new Rect(i * childWidth, 0, childWidth, totalHeight);
-			}
-
-			// Arrange children in a second pass
-			for (int i = 0; i < Children.Count; i++)
-			{
-				UIElement child = Children[i];
-				child.Arrange(arrangementRectangles[i]);
-			}
-
-			return finalSize;
-		}
-
-		private Rect GetChildBounds(UIElement child)
-		{
-			// Example: Retrieve manually calculated position and size
-			double x = Canvas.GetLeft(child);  // Custom X position
-			double y = Canvas.GetTop(child);   // Custom Y position
-			double width = 500; // Custom Width (or any set value)
-			double height = 500; // Custom Height (or any set value)
-
-			// Return a Rect specifying position and size
-			return new Rect(x, y, width, height);
-		}
-	}
-
-	public class ControlWindow
-	{
-		private struct ButtonData
-		{
-			public string Label;
-			public Action OnClick;
-			public Button Button;
-		}
-
-		private struct EditTextData
-		{
-			public Action<string> OnEdit;
-			public TextBox TextBox;
-		}
-
-		private readonly Window m_root;
-		private readonly StackPanel m_stackPanel;
-		private readonly Dictionary<Button, ButtonData> m_buttons = new();
-		private readonly Dictionary<TextBox, EditTextData> m_text = new();
-
-		public ControlWindow(Window root)
-		{
-			m_root = root;
-
-			m_root.Width = 300;
-			m_root.Height = 400;
-
-			var scrollViewer = new ScrollViewer
-			{
-				VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-			};
-
-			m_root.Content = scrollViewer;
-
-			// StackPanel to contain the widgets
-			m_stackPanel = new StackPanel();
-			scrollViewer.Content = m_stackPanel;
-		}
-
-		public void AddButton(string label, Action onClick)
-		{
-			Button button = new();
-
-			ButtonData data = new ButtonData();
-			data.Label = label;
-			data.OnClick = onClick;
-			data.Button = new Button();
-			data.Button.Content = label;
-
-			m_buttons.Add(data.Button, data);
-
-			m_stackPanel.Children.Add(data.Button);
-
-			data.Button.Click += Button_Click;
-		}
-
-		public void AddText(Action<string> onEdit)
-		{
-			TextBox text = new();
-
-			EditTextData data = new()
-			{
-				OnEdit = onEdit,
-				TextBox = text
-			};
-
-			m_stackPanel.Children.Add(data.TextBox);
-			m_text.Add(data.TextBox, data);
-
-			data.TextBox.LostFocus += TextBox_TextChanged;
-		}
-
-		private void TextBox_TextChanged(object sender, RoutedEventArgs e)
-		{
-			TextBox tb = (TextBox)sender;
-			m_text[tb].OnEdit(tb.Text);
-		}
-
-		private void Button_Click(object sender, RoutedEventArgs e)
-		{
-			m_buttons[(Button)sender].OnClick();
-		}
-
-		public void Show()
-		{
-			m_root.Show();
-		}
-	}
-
 
 	public class ExampleApp
 	{
 		public class UpdateLoop(in WidgetLayout layout)
 		{
 			private readonly WidgetLayout m_layout = layout;
-			private Entity[] m_entities = new Entity[10];
-			private Vector3 vec = new();
 			private List<(string, string)> m_paths = new();
 			private List<(string, string)> m_results = new();
 			private string m_searchPattern = "";
+			private bool m_bUseLambdas = false;
 
 			public void CollectPaths()
 			{
@@ -191,10 +28,6 @@ namespace ImWpf
 				int gen2 = GC.CollectionCount(2);
 				long totalMemory = GC.GetTotalMemory(false);
 
-				m_layout.Button("Testbutton line 1", ()=>{}, new Layout());
-				m_layout.Button("Testbutton line 2", ()=>{}, new Layout());
-				m_layout.Button("Testbutton line 3", () => { }, new Layout());
-
 				m_layout.Label("GC Statistics:", new Layout());
 				m_layout.Label($"  Collections (Gen 0): {gen0}", new Layout());
 				m_layout.Label($"  Collections (Gen 1): {gen1}", new Layout());
@@ -205,12 +38,15 @@ namespace ImWpf
 			public void Redraw()
 			{
 				m_layout.Begin();
+				DrawGcStats();
 
 				m_layout.EditText("Search...", m_searchPattern, new Layout(), (string s) =>
 				{
 					m_searchPattern = s;
 				}, () => {});
 
+				m_layout.Button($"Lambdas in the buttons [{(m_bUseLambdas ? 'X' : ' ')}]",
+					() => { m_bUseLambdas = !m_bUseLambdas; }, new Layout());
 
 				m_layout.Label($"Found {m_results.Count} files", new Layout());
 
@@ -218,15 +54,23 @@ namespace ImWpf
 
 				FileCollector.FilterBySubstring(m_paths, m_searchPattern, ref m_results);
 
-				foreach (var path in m_results.Take(10000))
+				if (m_bUseLambdas)
 				{
-					m_layout.Button(path.Item2, () => { Console.WriteLine($"Open file {path.Item1 + '\\' + path.Item2}"); }, new Layout());
+					foreach (var path in m_results.Take(10000))
+					{
+						m_layout.Button(path.Item2, () => { Console.WriteLine($"Open file {path.Item1 + '\\' + path.Item2}"); }, new Layout());
+					}
+				}
+				else
+				{
+					foreach (var path in m_results.Take(10000))
+					{
+						m_layout.Button(path.Item2, () => { }, new Layout());
+					}
 				}
 
 				m_layout.End();
 			}
-			int culled = 0;
-			int drawn = 0;
 		}
 
 		[DllImport("kernel32.dll")]
@@ -253,26 +97,6 @@ namespace ImWpf
 			updateLoop.CollectPaths();
 			layout.BindRedrawFunc(updateLoop.Redraw);
 			updateLoop.Redraw();
-
-			//ControlWindow controlWindow = new(new Window());
-
-			// controlWindow.AddButton("Redraw", () =>
-			// {
-			// 	updateLoop.Redraw();
-			// });
-
-			// controlWindow.AddButton("Remove Widget", () =>
-			// {
-			// 	//layout.RemoveWidget(nextButton);
-			// });
-
-			// controlWindow.AddText((string val) =>
-			// {
-			// 	//nextButton = val;
-			// });
-
-			// controlWindow.Show();
-
 			rootWindow.Width = 600;
 			rootWindow.Height = 800;
 			app.Run(rootWindow);
