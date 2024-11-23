@@ -37,7 +37,6 @@ namespace ImWpf
 
 			public void Redraw()
 			{
-				m_layout.Begin();
 				DrawGcStats();
 
 				m_layout.EditText("Search...", m_searchPattern, new Layout(), (string s) =>
@@ -68,8 +67,6 @@ namespace ImWpf
 						m_layout.Button(path.Item2, () => { }, new Layout());
 					}
 				}
-
-				m_layout.End();
 			}
 		}
 
