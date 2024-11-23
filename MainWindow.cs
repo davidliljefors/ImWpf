@@ -1,5 +1,5 @@
-﻿using System.Windows;
-using System.Windows.Controls;
+﻿using System.Diagnostics;
+using System.Windows;
 using System.Runtime.InteropServices;
 
 namespace ImWpf
@@ -14,11 +14,11 @@ namespace ImWpf
 			private List<(string, string)> m_paths = new();
 			private List<(string, string)> m_results = new();
 			private string m_searchPattern = "";
-			private bool m_bUseLambdas = false;
+			private u64 m_hLastSearch = 0;
 
 			public void CollectPaths()
 			{
-				m_paths = FileCollector.GetFiles2("C:\\dev");
+				m_paths = FileCollector.GetFiles2("C:\\dev\\ImWpf");
 			}
 
 			public void DrawGcStats()
@@ -35,37 +35,46 @@ namespace ImWpf
 				m_layout.Label($"  Total Memory Used: {totalMemory / (1024)} KB", new Layout());
 			}
 
+			private static void LaunchVsCode(string path)
+			{
+				Process.Start(new ProcessStartInfo
+				{
+					FileName = "cmd.exe",
+					Arguments = $"/c code \"{path}\"",
+					UseShellExecute = false,
+					CreateNoWindow = true
+				});
+			}
+
+			private int m_dragValue = 13;
 			public void Redraw()
 			{
-				DrawGcStats();
-
-				m_layout.EditText("Search...", m_searchPattern, new Layout(), (string s) =>
+				//DrawGcStats();
+				m_layout.Label("Quick Open in Vs Code", new Layout());
+				m_layout.DragInt($"Drag int {m_dragValue}", m_dragValue, -5, 25, new Layout(), (a) => m_dragValue = a);
+				m_layout.EditText("Search...", m_searchPattern, new Layout(), (s) =>
+					m_searchPattern = s, () =>
 				{
-					m_searchPattern = s;
-				}, () => {});
-
-				m_layout.Button($"Lambdas in the buttons [{(m_bUseLambdas ? 'X' : ' ')}]",
-					() => { m_bUseLambdas = !m_bUseLambdas; }, new Layout());
-
-				m_layout.Label($"Found {m_results.Count} files", new Layout());
+					if (m_results.Count > 0)
+					{
+						LaunchVsCode(m_results[0].Item1 + '\\' + m_results[0].Item2);
+					}
+				});
 
 				m_layout.Label(m_searchPattern, new Layout());
 
-				FileCollector.FilterBySubstring(m_paths, m_searchPattern, ref m_results);
-
-				if (m_bUseLambdas)
+				if (m_hLastSearch != XxHash.StringHash(m_searchPattern))
 				{
-					foreach (var path in m_results.Take(10000))
-					{
-						m_layout.Button(path.Item2, () => { Console.WriteLine($"Open file {path.Item1 + '\\' + path.Item2}"); }, new Layout());
-					}
+					FileCollector.FilterBySubstring(m_paths, m_searchPattern, ref m_results);
+					m_hLastSearch = XxHash.StringHash(m_searchPattern);
 				}
-				else
+
+				foreach (var path in m_results.Take(1000))
 				{
-					foreach (var path in m_results.Take(10000))
-					{
-						m_layout.Button(path.Item2, () => { }, new Layout());
-					}
+					m_layout.Button(path.Item2, () =>
+						{
+							LaunchVsCode(path.Item1 + '\\' + path.Item2);
+						}, new Layout());
 				}
 			}
 		}
@@ -76,17 +85,17 @@ namespace ImWpf
 		[STAThread]
 		public static void Main()
 		{
-			AllocConsole();
+			//AllocConsole();
 			Application app = new Application();
 
-			// var lunaTheme = new ResourceDictionary
-			// {
-			// 	Source = new Uri(
-			// 		"pack://application:,,,/PresentationFramework.Luna;component/themes/Luna.NormalColor.xaml",
-			// 		UriKind.Absolute)
-			// };
-			// app.Resources.MergedDictionaries.Clear();
-			// app.Resources.MergedDictionaries.Add(lunaTheme);
+			var lunaTheme = new ResourceDictionary
+			{
+				Source = new Uri(
+					"pack://application:,,,/PresentationFramework.Luna;component/themes/Luna.NormalColor.xaml",
+					UriKind.Absolute)
+			};
+			app.Resources.MergedDictionaries.Clear();
+			app.Resources.MergedDictionaries.Add(lunaTheme);
 
 			Window rootWindow = new();
 			WidgetLayout layout = new(rootWindow);

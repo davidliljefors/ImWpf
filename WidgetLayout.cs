@@ -66,6 +66,17 @@ public struct Layout
 	}
 }
 
+public readonly struct LayoutStyle
+{
+	public readonly double LineHeight = 32;
+	public readonly double Margin = 4;
+
+	public LayoutStyle()
+	{
+
+	}
+}
+
 public class WidgetLayout
 {
 	enum WidgetType
@@ -75,114 +86,7 @@ public class WidgetLayout
 		Label,
 		Textbox,
 		TextBlock,
-	}
-
-	private class WidgetHolder
-	{
-		public FrameworkElement widget;
-		public u64 lastState;
-		public WidgetType type;
-		public Action<string> OnTextEdit;
-		public Action OnClicked;
-	}
-
-	private const double kLineHeight = 32;
-	private const double kMargin = 4;
-	static public bool kEnableCulling = true;
-	private const int kPoolSize = 32;
-
-	private double m_cursorX;
-	private double m_cursorY;
-
-	private double m_lastHeight;
-	private bool m_editFlag = false;
-
-	private Dictionary<u64, WidgetHolder> m_lastWidgets = new();
-	private Dictionary<u64, WidgetHolder> m_currentWidgets = new();
-
-	private readonly ScrollViewer m_scrollView;
-	private readonly Canvas m_canvas;
-	private readonly Stack<Button> m_buttonPool = new Stack<Button>(kPoolSize);
-	private readonly Stack<Label> m_labelPool = new Stack<Label>(kPoolSize);
-	private readonly Stack<TextBox> m_textBoxPool = new Stack<TextBox>(kPoolSize);
-	private readonly Stack<TextBlock> m_textBlockPool = new Stack<TextBlock>(kPoolSize);
-
-	private readonly ContentControl m_root;
-	private Action m_redraw;
-	private u64 m_stateHash = 0;
-
-	private Button AllocateButton()
-	{
-		if (m_buttonPool.TryPop(out var button))
-		{
-			return button;
-		}
-
-		Button newButton = new Button();
-		newButton.Content = new TextBlock();
-		return newButton;
-	}
-
-
-	private Label AllocateLabel()
-	{
-		if (m_labelPool.TryPop(out var label))
-		{
-			return label;
-		}
-
-		return new Label();
-	}
-
-	private TextBox AllocateTextBox()
-	{
-		if (m_textBoxPool.TryPop(out var textBox))
-		{
-			return textBox;
-		}
-		return new TextBox();
-	}
-
-	private TextBlock AllocateTextBlock()
-	{
-		if (m_textBlockPool.TryPop(out var textBlock))
-		{
-			return textBlock;
-		}
-		return new TextBlock();
-	}
-
-	private void ReturnWidget(WidgetHolder holder)
-	{
-		switch (holder.type)
-		{
-			case WidgetType.None:
-				break;
-			case WidgetType.Button:
-				Button button = (Button)holder.widget;
-				button.Click -= Button_Click;
-				if (m_buttonPool.Count < kPoolSize)
-					m_buttonPool.Push(button);
-
-				break;
-			case WidgetType.Label:
-				if (m_labelPool.Count < kPoolSize)
-					m_labelPool.Push((Label)holder.widget);
-				break;
-			case WidgetType.Textbox:
-				TextBox textbox = (TextBox)holder.widget;
-				textbox.PreviewKeyDown -= Textbox_PreviewKeyDown;
-				textbox.TextChanged -= TextBox_TextChanged;
-
-				if (m_textBoxPool.Count < kPoolSize)
-					m_textBoxPool.Push(textbox);
-				break;
-			case WidgetType.TextBlock:
-				TextBlock textBlock = (TextBlock)holder.widget;
-				if (m_textBlockPool.Count < kPoolSize)
-					m_textBlockPool.Push(textBlock);
-				break;
-		}
+		Slider,
 	}
 
 	[Flags]
@@ -192,17 +96,50 @@ public class WidgetLayout
 		TakeFocus = 1
 	}
 
+	private class WidgetHolder
+	{
+		public FrameworkElement widget;
+		public WidgetType type;
+		public Action<string> OnTextEdit;
+		public Action OnClicked;
+		public Action<int> IntValueChanged;
+	}
+
+
+	private const int kPoolSize = 32;
+
+	private double m_cursorX;
+	private double m_cursorY;
+	private double m_lastHeight;
+	private bool m_editFlag = false;
+
+	private Dictionary<u64, WidgetHolder> m_lastWidgets = new();
+	private Dictionary<u64, WidgetHolder> m_currentWidgets = new();
+
+	private readonly Canvas m_canvas;
+	private readonly ContentControl m_root;
+	private readonly ScrollViewer m_scrollView;
+
+	private readonly Stack<Button> m_buttonPool = new Stack<Button>(kPoolSize);
+	private readonly Stack<Label> m_labelPool = new Stack<Label>(kPoolSize);
+	private readonly Stack<TextBox> m_textBoxPool = new Stack<TextBox>(kPoolSize);
+	private readonly Stack<TextBlock> m_textBlockPool = new Stack<TextBlock>(kPoolSize);
+	private readonly Stack<Slider> m_sliderPool = new Stack<Slider>(kPoolSize);
+
+	private Action m_redraw;
+	private u64 m_stateHash = 0;
 	private Flag m_flags = Flag.None;
+	private LayoutStyle m_style = new LayoutStyle();
+	private Rect m_viewportRect = Rect.Empty;
+	private double m_lastVerticalOffset = 0.0;
 
-	public void PushFocusFlag()
+	private record struct RenderState
 	{
-		m_flags |= Flag.TakeFocus;
+		public double WindowSizeX;
+		public double WindowSizeY;
+		public double ScrollOffsetY;
 	}
-
-	public void PopFocusFlag()
-	{
-		m_flags = m_flags & (~Flag.TakeFocus);
-	}
+	private RenderState m_lastState = new RenderState();
 
 	public WidgetLayout(ContentControl root)
 	{
@@ -210,7 +147,7 @@ public class WidgetLayout
 		m_root = root;
 		m_scrollView = new ScrollViewer();
 		m_scrollView.VerticalScrollBarVisibility = ScrollBarVisibility.Visible;
-		m_scrollView.PreviewKeyDown += M_scrollView_PreviewKeyDown;
+		m_scrollView.PreviewKeyDown += ScrollView_PreviewKeyDown;
 		KeyboardNavigation.SetDirectionalNavigation(m_scrollView, KeyboardNavigationMode.None);
 		m_canvas = new Canvas
 		{
@@ -224,25 +161,25 @@ public class WidgetLayout
 		CompositionTarget.Rendering += Render;
 	}
 
-	private void M_scrollView_PreviewKeyDown(object sender, KeyEventArgs e)
+	public void SetStyle(LayoutStyle style)
 	{
-		var focused = Keyboard.FocusedElement as UIElement;
-		if (e.Key == Key.Up)
-		{
-			e.Handled = true;
-			focused.MoveFocus(new TraversalRequest(FocusNavigationDirection.Up));
-		}
-		else if (e.Key == Key.Down)
-		{
-			e.Handled = true;
-			focused.MoveFocus(new TraversalRequest(FocusNavigationDirection.Down));
-		}
-		else if (e.Key == Key.PageDown || e.Key == Key.PageUp)
-		{
-			e.Handled = true;
-		}
+		m_style = style;
+		MarkEdit();
+	}
 
+	public void MarkEdit()
+	{
 		m_editFlag = true;
+	}
+
+	public void PushFocusFlag()
+	{
+		m_flags |= Flag.TakeFocus;
+	}
+
+	public void PopFocusFlag()
+	{
+		m_flags = m_flags & (~Flag.TakeFocus);
 	}
 
 	public void BindRedrawFunc(Action redraw)
@@ -250,16 +187,104 @@ public class WidgetLayout
 		m_redraw = redraw;
 	}
 
-	private double m_lastVerticalOffset = 0.0;
-
-	private record struct RenderState
+	public void Begin()
 	{
-		public double WindowSizeX;
-		public double WindowSizeY;
-		public double ScrollOffsetY;
+		m_canvas.Visibility = Visibility.Hidden;
+		m_stateHash = 0;
+		m_cursorX = m_style.Margin;
+		m_cursorY = m_style.Margin;
+
+		m_viewportRect = new Rect(0, 0, m_scrollView.ActualWidth, m_scrollView.ActualHeight + m_style.LineHeight * 4);
+		double offsetX = m_scrollView.HorizontalOffset;
+		double offsetY = m_scrollView.VerticalOffset - m_style.LineHeight * 2;
+		m_viewportRect.X += offsetX;
+		m_viewportRect.Y += offsetY;
 	}
 
-	private RenderState m_lastState = new RenderState();
+	public void End()
+	{
+		m_lastHeight = m_cursorY;
+
+		foreach (var value in m_lastWidgets)
+		{
+			m_canvas.Children.Remove(value.Value.widget);
+			ReturnWidget(value.Value);
+		}
+		m_lastWidgets.Clear();
+
+		(m_lastWidgets, m_currentWidgets) = (m_currentWidgets, m_lastWidgets);
+
+		m_canvas.Visibility = Visibility.Visible;
+	}
+
+	public void Button(string label, Action onClicked, Layout layout, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
+	{
+		m_stateHash = XxHash.StringHash(caller, m_stateHash);
+		m_stateHash = XxHash.ValueHash(m_stateHash, (u64)lineNum);
+
+		var (buttonVisible, buttonRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		if (buttonVisible)
+		{
+			var (reused, holder) = GetOrCreateButton(m_stateHash, label, onClicked);
+			ApplyWidgetRect(holder.widget, buttonRect);
+		}
+	}
+
+	public void Label(string label, Layout layout, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
+	{
+		m_stateHash = XxHash.StringHash(caller, m_stateHash);
+		m_stateHash = XxHash.ValueHash(m_stateHash, (u64)lineNum);
+
+		var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		if (labelVisible)
+			ApplyWidgetRect(GetOrCreateTextBlock(m_stateHash, label).Item2.widget, labelRect);
+	}
+
+	public void EditText(string label, string content, Layout layout, Action<string> onEdit, Action onAccept, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
+	{
+		m_stateHash = XxHash.StringHash(caller, m_stateHash);
+		m_stateHash = XxHash.ValueHash(m_stateHash, (u64)lineNum);
+
+		var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(0.3, true), ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		if (labelVisible)
+			ApplyWidgetRect(GetOrCreateTextBlock(m_stateHash, label).Item2.widget, labelRect);
+
+		m_stateHash = XxHash.ValueHash(m_stateHash, m_stateHash);
+		var (contentVisible, contentRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		if (contentVisible)
+		{
+			var (reusedTextbox, contentHolder) = GetOrCreateTextbox(m_stateHash, content, onEdit, onAccept);
+			if ((m_flags & Flag.TakeFocus) == Flag.TakeFocus)
+			{
+				contentHolder.widget.Focus();
+			}
+			ApplyWidgetRect(contentHolder.widget, contentRect);
+		}
+	}
+
+	public void DragInt(string label, int value, int min, int max, Layout layout, Action<int> onDrag, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
+	{
+		m_stateHash = XxHash.StringHash(caller, m_stateHash);
+		m_stateHash = XxHash.ValueHash(m_stateHash, (u64)lineNum);
+
+		var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(0.3, true), ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		if (labelVisible)
+			ApplyWidgetRect(GetOrCreateTextBlock(m_stateHash, label).Item2.widget, labelRect);
+
+		m_stateHash = XxHash.ValueHash(m_stateHash, m_stateHash);
+
+		m_stateHash = XxHash.ValueHash(m_stateHash, m_stateHash);
+		var (contentVisible, contentRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
+		if (contentVisible)
+		{
+			var (reusedTextbox, contentHolder) = GetOrCreateSlider(m_stateHash, value, min, max, onDrag);
+			if ((m_flags & Flag.TakeFocus) == Flag.TakeFocus)
+			{
+				contentHolder.widget.Focus();
+			}
+			ApplyWidgetRect(contentHolder.widget, contentRect);
+		}
+	}
 
 	private void Render(object _, EventArgs __)
 	{
@@ -313,98 +338,6 @@ public class WidgetLayout
 		}
 	}
 
-	private Rect m_viewportRect = Rect.Empty;
-
-	public void Begin()
-	{
-		m_canvas.Visibility = Visibility.Hidden;
-		m_stateHash = 0;
-		m_cursorX = kMargin;
-		m_cursorY = kMargin;
-
-		m_viewportRect = new Rect(0, 0, m_scrollView.ActualWidth, m_scrollView.ActualHeight + kLineHeight * 4);
-		double offsetX = m_scrollView.HorizontalOffset;
-		double offsetY = m_scrollView.VerticalOffset - kLineHeight * 2;
-		m_viewportRect.X += offsetX;
-		m_viewportRect.Y += offsetY;
-	}
-
-	public void End()
-	{
-		m_cursorY += kLineHeight;
-
-		m_lastHeight = m_cursorY;
-
-		foreach (var value in m_lastWidgets)
-		{
-			m_canvas.Children.Remove(value.Value.widget);
-			ReturnWidget(value.Value);
-		}
-		m_lastWidgets.Clear();
-
-		(m_lastWidgets, m_currentWidgets) = (m_currentWidgets, m_lastWidgets);
-
-		m_canvas.Visibility = Visibility.Visible;
-	}
-
-	public void Button(string label, Action onClicked, Layout layout, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
-	{
-		m_stateHash = XxHash.StringHash(caller, m_stateHash);
-		m_stateHash = XxHash.ValueHash(m_stateHash, (u64)lineNum);
-
-		var (buttonVisible, buttonRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
-		if (buttonVisible)
-		{
-			var (reused, holder) = GetOrCreateButton(m_stateHash, label, onClicked);
-			ApplyWidgetRect(holder.widget, buttonRect);
-		}
-	}
-
-	public void TextBlock(string label, Layout layout, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
-	{
-		m_stateHash = XxHash.StringHash(caller, m_stateHash);
-		m_stateHash = XxHash.ValueHash(m_stateHash, (u64)lineNum);
-
-		var (buttonVisible, buttonRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
-		if (buttonVisible)
-		{
-			var (reused, holder) = GetOrCreateTextBlock(m_stateHash, label);
-			ApplyWidgetRect(holder.widget, buttonRect);
-		}
-	}
-
-	public void Label(string label, Layout layout, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
-	{
-		m_stateHash = XxHash.StringHash(caller, m_stateHash);
-		m_stateHash = XxHash.ValueHash(m_stateHash, (u64)lineNum);
-
-		var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
-		if (labelVisible)
-			ApplyWidgetRect(GetOrCreateWidget<Label>(m_stateHash, label).Item2.widget, labelRect);
-	}
-
-	public void EditText(string label, string content, Layout layout, Action<string> onEdit, Action onAccept, int lineNum = 0, [CallerFilePath] string caller = "")
-	{
-		m_stateHash = XxHash.StringHash(caller, m_stateHash);
-		m_stateHash = XxHash.ValueHash(m_stateHash, (u64)lineNum);
-
-		var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(0.3, true), ref m_cursorX, ref m_cursorY, m_canvas.Width);
-		if (labelVisible)
-			ApplyWidgetRect(GetOrCreateWidget<Label>(m_stateHash, label).Item2.widget, labelRect);
-
-		m_stateHash = XxHash.ValueHash(m_stateHash, m_stateHash);
-		var (contentVisible, contentRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
-		if (contentVisible)
-		{
-			var (reusedTextbox, contentHolder) = GetOrCreateTextbox(m_stateHash, content, onEdit, onAccept);
-			if ((m_flags & Flag.TakeFocus) == Flag.TakeFocus)
-			{
-				contentHolder.widget.Focus();
-			}
-			ApplyWidgetRect(contentHolder.widget, contentRect);
-		}
-	}
-
 	private (bool, WidgetHolder) GetOrCreateButton(u64 hash, string content, Action onClicked)
 	{
 		if (FindWidgetHolder<Button>(hash, out WidgetHolder holder))
@@ -422,7 +355,7 @@ public class WidgetLayout
 		widget.Click += Button_Click;
 		((TextBlock)widget.Content).Text = content;
 
-		var newHolder = new WidgetHolder { lastState = hash, widget = widget, type = WidgetType.Button, OnClicked = onClicked };
+		var newHolder = new WidgetHolder { widget = widget, type = WidgetType.Button, OnClicked = onClicked };
 		m_canvas.Children.Add(widget);
 		m_currentWidgets.Add(hash, newHolder);
 
@@ -444,29 +377,7 @@ public class WidgetLayout
 		TextBlock widget = AllocateTextBlock();
 		widget.Text = content;
 
-		var newHolder = new WidgetHolder { lastState = hash, widget = widget, type = WidgetType.TextBlock };
-		m_canvas.Children.Add(widget);
-		m_currentWidgets.Add(hash, newHolder);
-
-		return (false, newHolder);
-	}
-
-	private (bool, WidgetHolder) GetOrCreateWidget<T>(u64 hash, string content) where T : ContentControl, new()
-	{
-		if (FindWidgetHolder<T>(hash, out WidgetHolder holder))
-		{
-			T old = (T)holder.widget;
-			if (!Equals(old.Content, content))
-			{
-				old.Content = content;
-			}
-			return (true, holder);
-		}
-
-		T widget = new T();
-		widget.Content = content;
-
-		var newHolder = new WidgetHolder { lastState = hash, widget = widget, type = GetTypeFromWidget<T>() };
+		var newHolder = new WidgetHolder { widget = widget, type = WidgetType.TextBlock };
 		m_canvas.Children.Add(widget);
 		m_currentWidgets.Add(hash, newHolder);
 
@@ -492,11 +403,182 @@ public class WidgetLayout
 		widget.TextChanged += TextBox_TextChanged;
 		widget.PreviewKeyDown += Textbox_PreviewKeyDown;
 
-		var newHolder = new WidgetHolder { lastState = hash, widget = widget, OnTextEdit = onEdit, OnClicked = onAccept };
+		var newHolder = new WidgetHolder { widget = widget, OnTextEdit = onEdit, OnClicked = onAccept };
 		m_canvas.Children.Add(widget);
 		m_currentWidgets.Add(hash, newHolder);
 
 		return (false, newHolder);
+	}
+
+	private (bool, WidgetHolder) GetOrCreateSlider(u64 hash, int value, int min, int max, Action<int> onDrag)
+	{
+		if (FindWidgetHolder<Slider>(hash, out var holder))
+		{
+			Slider old = (Slider)holder.widget;
+			old.Value = value;
+			old.Minimum = min;
+			old.Maximum = max;
+			return (true, holder);
+		}
+
+		Slider widget = AllocateSlider();
+		widget.Value = value;
+		widget.Minimum = min;
+		widget.Maximum = max;
+		widget.TickFrequency = 1.0;
+		widget.IsSnapToTickEnabled = true;
+		widget.ValueChanged += Slider_ValueChanged;
+
+		var newHolder = new WidgetHolder { widget = widget, IntValueChanged = onDrag };
+		m_canvas.Children.Add(widget);
+		m_currentWidgets.Add(hash, newHolder);
+
+		return (false, newHolder);
+	}
+
+	private (bool visible, Rect rect) GetWidgetRectAndMoveCursor(Layout layout, ref double curX, ref double curY, double lineWidth)
+	{
+		double desiredWith = 0;
+		double desiredX = curX;
+		double desiredY = curY;
+		if (layout.absolute)
+		{
+			desiredWith = layout.width;
+		}
+		else
+		{
+			double remainingWidth = Math.Max(lineWidth - curX - m_style.Margin / 2, 0);
+			desiredWith = remainingWidth * layout.width;
+		}
+
+		curX += desiredWith + m_style.Margin;
+
+		Rect rect = new Rect();
+
+		rect.X = desiredX;
+		rect.Y = desiredY;
+		rect.Width = desiredWith;
+		rect.Height = m_style.LineHeight;
+
+		if (!layout.nextOnSameLine)
+		{
+			curX = m_style.Margin;
+			curY += m_style.LineHeight;
+		}
+
+		if (CullElement(ref rect, ref m_viewportRect))
+		{
+			return (false, rect);
+		}
+
+		return (true, rect);
+
+	}
+
+	private void ApplyWidgetRect(FrameworkElement widget, Rect rect)
+	{
+		if (widget.Visibility == Visibility.Hidden)
+		{
+			m_canvas.Children.Add(widget);
+			widget.Visibility = Visibility.Visible;
+		}
+
+		widget.Height = rect.Height - m_style.Margin;
+		widget.Width = rect.Width;
+
+		Canvas.SetTop(widget, rect.Y);
+		Canvas.SetLeft(widget, rect.X);
+	}
+
+	private bool FindWidgetHolder<T>(u64 hash, out WidgetHolder holder) where T : FrameworkElement, new()
+	{
+		if (m_lastWidgets.TryGetValue(hash, out var reusedHolder))
+		{
+			holder = reusedHolder;
+			m_lastWidgets.Remove(hash);
+			m_currentWidgets.Add(hash, reusedHolder);
+			return true;
+		}
+
+		holder = null;
+		return false;
+	}
+
+	private Button AllocateButton()
+	{
+		if (m_buttonPool.TryPop(out var button))
+		{
+			return button;
+		}
+
+		Button newButton = new Button();
+		newButton.Content = new TextBlock();
+		return newButton;
+	}
+
+	private TextBox AllocateTextBox()
+	{
+		if (m_textBoxPool.TryPop(out var textBox))
+		{
+			return textBox;
+		}
+		return new TextBox();
+	}
+
+	private TextBlock AllocateTextBlock()
+	{
+		if (m_textBlockPool.TryPop(out var textBlock))
+		{
+			return textBlock;
+		}
+		return new TextBlock();
+	}
+
+	private Slider AllocateSlider()
+	{
+		if (m_sliderPool.TryPop(out var slider))
+		{
+			return slider;
+		}
+		return new Slider();
+	}
+
+	private void ReturnWidget(WidgetHolder holder)
+	{
+		switch (holder.type)
+		{
+			case WidgetType.None:
+				break;
+			case WidgetType.Button:
+				Button button = (Button)holder.widget;
+				button.Click -= Button_Click;
+				if (m_buttonPool.Count < kPoolSize)
+					m_buttonPool.Push(button);
+
+				break;
+			case WidgetType.Label:
+				if (m_labelPool.Count < kPoolSize)
+					m_labelPool.Push((Label)holder.widget);
+				break;
+			case WidgetType.Textbox:
+				TextBox textbox = (TextBox)holder.widget;
+				textbox.PreviewKeyDown -= Textbox_PreviewKeyDown;
+				textbox.TextChanged -= TextBox_TextChanged;
+
+				if (m_textBoxPool.Count < kPoolSize)
+					m_textBoxPool.Push(textbox);
+				break;
+			case WidgetType.TextBlock:
+				TextBlock textBlock = (TextBlock)holder.widget;
+				if (m_textBlockPool.Count < kPoolSize)
+					m_textBlockPool.Push(textBlock);
+				break;
+			case WidgetType.Slider:
+				Slider slider = (Slider)holder.widget;
+				if (m_sliderPool.Count < kPoolSize)
+					m_sliderPool.Push(slider);
+				break;
+		}
 	}
 
 	private void Textbox_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -510,7 +592,7 @@ public class WidgetLayout
 					widget.Value.OnClicked();
 				}
 			}
-			m_editFlag = true;
+			MarkEdit();
 		}
 
 		if (e.Key == Key.Up)
@@ -532,7 +614,8 @@ public class WidgetLayout
 				widget.Value.OnClicked();
 			}
 		}
-		m_editFlag = true;
+
+		MarkEdit();
 	}
 
 	private void TextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -546,103 +629,46 @@ public class WidgetLayout
 			}
 		}
 
-		m_editFlag = true;
+		MarkEdit();
 	}
 
-	private (bool visible, Rect rect) GetWidgetRectAndMoveCursor(Layout layout, ref double curX, ref double curY, double lineWidth)
+	private void ScrollView_PreviewKeyDown(object sender, KeyEventArgs e)
 	{
-		double desiredWith = 0;
-		double desiredX = curX;
-		double desiredY = curY;
-		if (layout.absolute)
+		if (Keyboard.FocusedElement is not UIElement focused)
 		{
-			desiredWith = layout.width;
-		}
-		else
-		{
-			double remainingWidth = Math.Max(lineWidth - curX - kMargin / 2, 0);
-			desiredWith = remainingWidth * layout.width;
+			return;
 		}
 
-		curX += desiredWith + kMargin;
-
-		Rect rect = new Rect();
-
-		rect.X = desiredX;
-		rect.Y = desiredY;
-		rect.Width = desiredWith;
-		rect.Height = kLineHeight;
-
-		if (!layout.nextOnSameLine)
+		if (e.Key == Key.Up)
 		{
-			curX = kMargin;
-			curY += kLineHeight;
+			e.Handled = true;
+			focused.MoveFocus(new TraversalRequest(FocusNavigationDirection.Up));
+			MarkEdit();
 		}
-
-		if (CullElement(ref rect, ref m_viewportRect) && kEnableCulling)
+		else if (e.Key == Key.Down)
 		{
-			return (false, rect);
+			e.Handled = true;
+			focused.MoveFocus(new TraversalRequest(FocusNavigationDirection.Down));
+			MarkEdit();
 		}
-
-		return (true, rect);
-
-	}
-
-	private void HideCulledWidget(u64 hash)
-	{
-		if (m_lastWidgets.TryGetValue(hash, out var reusedHolder))
+		else if (e.Key == Key.PageDown || e.Key == Key.PageUp)
 		{
-			reusedHolder.widget.Visibility = Visibility.Hidden;
-			m_canvas.Children.Remove(reusedHolder.widget);
+			e.Handled = true;
+			MarkEdit();
 		}
 	}
 
-	private void ApplyWidgetRect(FrameworkElement widget, Rect rect)
+	private void Slider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
 	{
-		if (widget.Visibility == Visibility.Hidden)
+		foreach (var widget in m_lastWidgets)
 		{
-			m_canvas.Children.Add(widget);
-			widget.Visibility = Visibility.Visible;
+			if (widget.Value.widget == sender)
+			{
+				var slider = e.OriginalSource as Slider;
+				widget.Value.IntValueChanged((int)slider.Value);
+			}
 		}
-
-		widget.Height = rect.Height - kMargin;
-		widget.Width = rect.Width;
-
-		Canvas.SetTop(widget, rect.Y);
-		Canvas.SetLeft(widget, rect.X);
-	}
-
-	private bool FindWidgetHolder<T>(u64 hash, out WidgetHolder holder) where T : FrameworkElement, new()
-	{
-		if (m_lastWidgets.TryGetValue(hash, out var reusedHolder))
-		{
-			holder = reusedHolder;
-			m_lastWidgets.Remove(hash);
-			m_currentWidgets.Add(hash, reusedHolder);
-			return true;
-		}
-
-		holder = null;
-		return false;
-	}
-
-	private static WidgetType GetTypeFromWidget<T>()
-	{
-		if (typeof(T) == typeof(Button))
-			return WidgetType.Button;
-
-		if (typeof(T) == typeof(Label))
-			return WidgetType.Label;
-
-		if (typeof(T) == typeof(TextBox))
-			return WidgetType.Textbox;
-
-		return WidgetType.None;
-	}
-
-	public void MarkEdit()
-	{
-		m_editFlag = true;
+		MarkEdit();
 	}
 
 	private static bool CullElement(ref Rect rect, ref Rect viewportRect)
