@@ -225,7 +225,7 @@ public class WidgetLayout
 		var (buttonVisible, buttonRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 		if (buttonVisible)
 		{
-			var (reused, holder) = GetOrCreateButton(m_stateHash, label, onClicked);
+			var holder = GetOrCreateButton(m_stateHash, label, onClicked);
 			ApplyWidgetRect(holder.widget, buttonRect);
 		}
 	}
@@ -237,7 +237,7 @@ public class WidgetLayout
 
 		var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 		if (labelVisible)
-			ApplyWidgetRect(GetOrCreateTextBlock(m_stateHash, label).Item2.widget, labelRect);
+			ApplyWidgetRect(GetOrCreateTextBlock(m_stateHash, label).widget, labelRect);
 	}
 
 	public void EditText(string label, string content, Layout layout, Action<string> onEdit, Action onAccept, [CallerLineNumber] int lineNum = 0, [CallerFilePath] string caller = "")
@@ -247,18 +247,18 @@ public class WidgetLayout
 
 		var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(0.3, true), ref m_cursorX, ref m_cursorY, m_canvas.Width);
 		if (labelVisible)
-			ApplyWidgetRect(GetOrCreateTextBlock(m_stateHash, label).Item2.widget, labelRect);
+			ApplyWidgetRect(GetOrCreateTextBlock(m_stateHash, label).widget, labelRect);
 
 		m_stateHash = XxHash.ValueHash(m_stateHash, m_stateHash);
 		var (contentVisible, contentRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 		if (contentVisible)
 		{
-			var (reusedTextbox, contentHolder) = GetOrCreateTextbox(m_stateHash, content, onEdit, onAccept);
+			var holder = GetOrCreateTextbox(m_stateHash, content, onEdit, onAccept);
 			if ((m_flags & Flag.TakeFocus) == Flag.TakeFocus)
 			{
-				contentHolder.widget.Focus();
+				holder.widget.Focus();
 			}
-			ApplyWidgetRect(contentHolder.widget, contentRect);
+			ApplyWidgetRect(holder.widget, contentRect);
 		}
 	}
 
@@ -269,7 +269,7 @@ public class WidgetLayout
 
 		var (labelVisible, labelRect) = GetWidgetRectAndMoveCursor(Layout.RelativeWidth(0.3, true), ref m_cursorX, ref m_cursorY, m_canvas.Width);
 		if (labelVisible)
-			ApplyWidgetRect(GetOrCreateTextBlock(m_stateHash, label).Item2.widget, labelRect);
+			ApplyWidgetRect(GetOrCreateTextBlock(m_stateHash, label).widget, labelRect);
 
 		m_stateHash = XxHash.ValueHash(m_stateHash, m_stateHash);
 
@@ -277,12 +277,12 @@ public class WidgetLayout
 		var (contentVisible, contentRect) = GetWidgetRectAndMoveCursor(layout, ref m_cursorX, ref m_cursorY, m_canvas.Width);
 		if (contentVisible)
 		{
-			var (reusedTextbox, contentHolder) = GetOrCreateSlider(m_stateHash, value, min, max, onDrag);
+			var holder = GetOrCreateSlider(m_stateHash, value, min, max, onDrag);
 			if ((m_flags & Flag.TakeFocus) == Flag.TakeFocus)
 			{
-				contentHolder.widget.Focus();
+				holder.widget.Focus();
 			}
-			ApplyWidgetRect(contentHolder.widget, contentRect);
+			ApplyWidgetRect(holder.widget, contentRect);
 		}
 	}
 
@@ -338,7 +338,7 @@ public class WidgetLayout
 		}
 	}
 
-	private (bool, WidgetHolder) GetOrCreateButton(u64 hash, string content, Action onClicked)
+	private WidgetHolder GetOrCreateButton(u64 hash, string content, Action onClicked)
 	{
 		if (FindWidgetHolder<Button>(hash, out WidgetHolder holder))
 		{
@@ -348,7 +348,7 @@ public class WidgetLayout
 				((TextBlock)old.Content).Text = content;
 				holder.OnClicked = onClicked;
 			}
-			return (true, holder);
+			return holder;
 		}
 
 		Button widget = AllocateButton();
@@ -359,10 +359,10 @@ public class WidgetLayout
 		m_canvas.Children.Add(widget);
 		m_currentWidgets.Add(hash, newHolder);
 
-		return (false, newHolder);
+		return newHolder;
 	}
 
-	private (bool, WidgetHolder) GetOrCreateTextBlock(u64 hash, string content)
+	private WidgetHolder GetOrCreateTextBlock(u64 hash, string content)
 	{
 		if (FindWidgetHolder<TextBlock>(hash, out WidgetHolder holder))
 		{
@@ -371,7 +371,7 @@ public class WidgetLayout
 			{
 				old.Text = content;
 			}
-			return (true, holder);
+			return holder;
 		}
 
 		TextBlock widget = AllocateTextBlock();
@@ -381,10 +381,10 @@ public class WidgetLayout
 		m_canvas.Children.Add(widget);
 		m_currentWidgets.Add(hash, newHolder);
 
-		return (false, newHolder);
+		return newHolder;
 	}
 
-	private (bool, WidgetHolder) GetOrCreateTextbox(u64 hash, string text, Action<string> onEdit, Action onAccept)
+	private WidgetHolder GetOrCreateTextbox(u64 hash, string text, Action<string> onEdit, Action onAccept)
 	{
 		if (FindWidgetHolder<TextBox>(hash, out var holder))
 		{
@@ -393,7 +393,7 @@ public class WidgetLayout
 			{
 				old.Text = text;
 			}
-			return (true, holder);
+			return holder;
 		}
 
 		TextBox widget = AllocateTextBox();
@@ -407,10 +407,10 @@ public class WidgetLayout
 		m_canvas.Children.Add(widget);
 		m_currentWidgets.Add(hash, newHolder);
 
-		return (false, newHolder);
+		return newHolder;
 	}
 
-	private (bool, WidgetHolder) GetOrCreateSlider(u64 hash, int value, int min, int max, Action<int> onDrag)
+	private WidgetHolder GetOrCreateSlider(u64 hash, int value, int min, int max, Action<int> onDrag)
 	{
 		if (FindWidgetHolder<Slider>(hash, out var holder))
 		{
@@ -418,7 +418,7 @@ public class WidgetLayout
 			old.Value = value;
 			old.Minimum = min;
 			old.Maximum = max;
-			return (true, holder);
+			return holder;
 		}
 
 		Slider widget = AllocateSlider();
@@ -433,7 +433,7 @@ public class WidgetLayout
 		m_canvas.Children.Add(widget);
 		m_currentWidgets.Add(hash, newHolder);
 
-		return (false, newHolder);
+		return newHolder;
 	}
 
 	private (bool visible, Rect rect) GetWidgetRectAndMoveCursor(Layout layout, ref double curX, ref double curY, double lineWidth)

@@ -18,7 +18,7 @@ namespace ImWpf
 
 			public void CollectPaths()
 			{
-				m_paths = FileCollector.GetFiles2("C:\\dev\\ImWpf");
+				m_paths = FileCollector.GetFiles2("C:\\dev");
 			}
 
 			public void DrawGcStats()
@@ -69,7 +69,7 @@ namespace ImWpf
 					m_hLastSearch = XxHash.StringHash(m_searchPattern);
 				}
 
-				foreach (var path in m_results.Take(1000))
+				foreach (var path in m_results.Take(100000))
 				{
 					m_layout.Button(path.Item2, () =>
 						{
