@@ -46,13 +46,16 @@ namespace ImWpf
 				});
 			}
 
-			private int m_dragValue = 13;
 			public void Redraw()
 			{
+				if (m_hLastSearch != XxHash.StringHash(m_searchPattern))
+				{
+					FileCollector.FilterBySubstring(m_paths, m_searchPattern, ref m_results);
+					m_hLastSearch = XxHash.StringHash(m_searchPattern);
+				}
 				//DrawGcStats();
 				m_layout.Label("Quick Open in Vs Code", new Layout());
-				m_layout.DragInt($"Drag int {m_dragValue}", m_dragValue, -5, 25, new Layout(), (a) => m_dragValue = a);
-				m_layout.EditText("Search...", m_searchPattern, new Layout(), (s) =>
+				m_layout.EditText($"Search {m_paths.Count} results...", m_searchPattern, new Layout(), (s) =>
 					m_searchPattern = s, () =>
 				{
 					if (m_results.Count > 0)
@@ -61,15 +64,7 @@ namespace ImWpf
 					}
 				});
 
-				m_layout.Label(m_searchPattern, new Layout());
-
-				if (m_hLastSearch != XxHash.StringHash(m_searchPattern))
-				{
-					FileCollector.FilterBySubstring(m_paths, m_searchPattern, ref m_results);
-					m_hLastSearch = XxHash.StringHash(m_searchPattern);
-				}
-
-				foreach (var path in m_results.Take(100000))
+				foreach (var path in m_results.Take(10000))
 				{
 					m_layout.Button(path.Item2, () =>
 						{
