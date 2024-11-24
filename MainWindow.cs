@@ -18,7 +18,7 @@ namespace ImWpf
 
 			public void CollectPaths()
 			{
-				m_paths = FileCollector.GetFiles2("C:\\dev");
+				m_paths = FileCollector.GetAllFilesInDirectory("C:\\dev");
 			}
 
 			public void DrawGcStats()

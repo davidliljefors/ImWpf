@@ -1,54 +1,19 @@
-using System;
-using System.Collections.Generic;
 using System.IO;
+
+namespace ImWpf;
 
 public class FileCollector
 {
-    public static List<string> GetAllFilePaths(string rootPath)
-    {
-        var filePaths = new List<string>();
-        var directories = new List<string>();
+	public static List<(string, string)> GetAllFilesInDirectory(string directory)
+	{
+		var folder = new DirectoryInfo(directory);
+		var files = from file in folder.EnumerateFiles("*.*", SearchOption.AllDirectories)
+					select (file.DirectoryName, file.Name);
 
-        // Start with the root directory
-        directories.Add(rootPath);
+		return files.ToList();
+	}
 
-        while (directories.Count > 0)
-        {
-            // Pop a directory from the stack
-            int last = directories.Count-1;
-            var currentDir = directories[last];
-            directories.RemoveAt(last);
-
-            try
-            {
-                // Collect all files in the current directory
-                filePaths.AddRange(Directory.GetFiles(currentDir));
-                directories.AddRange(Directory.GetDirectories(currentDir));
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Skip directories/files that can't be accessed
-                Console.WriteLine($"Access denied to directory: {currentDir}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error in directory: {currentDir}. Exception: {ex.Message}");
-            }
-        }
-
-        return filePaths;
-    }
-
-    public static List<(string, string)> GetFiles2(string directory)
-    {
-	    var folder=new DirectoryInfo(directory);
-	    var files=from file in folder.EnumerateFiles("*.*", SearchOption.AllDirectories)
-		    select (file.DirectoryName, file.Name);
-
-	    return files.ToList();
-    }
-
-    public static void FilterBySubstring(List<(string, string)> inputList, string searchString, ref List<(string, string)> results)
+	public static void FilterBySubstring(List<(string, string)> inputList, string searchString, ref List<(string, string)> results)
     {
         results.Clear();
 
