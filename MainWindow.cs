@@ -97,7 +97,6 @@ namespace ImWpf
 			UpdateLoop updateLoop = new(in layout);
 			updateLoop.CollectPaths();
 			layout.BindRedrawFunc(updateLoop.Redraw);
-			updateLoop.Redraw();
 			rootWindow.Width = 600;
 			rootWindow.Height = 800;
 			app.Run(rootWindow);
